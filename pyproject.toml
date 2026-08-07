@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stock-video-generator"
-version = "0.1.1"
+version = "0.1.2"
 description = "Deterministic stock historical simulation and video generation service"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,9 +18,12 @@ dependencies = [
   "numpy>=2.1",
   "pandas>=2.2",
   "patchright>=1.56",
+  "mini-racer>=0.12.4",
+  "psutil>=7.0",
   "pydantic>=2.10",
   "pydantic-settings>=2.7",
   "python-multipart>=0.0.20",
+  "requests>=2.32",
   "sqlalchemy>=2.0",
   "tenacity>=9.0",
   "uvicorn[standard]>=0.34",

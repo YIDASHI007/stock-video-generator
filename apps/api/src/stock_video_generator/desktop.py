@@ -6,12 +6,10 @@ import json
 import os
 import subprocess
 import sys
-import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
-import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +18,14 @@ APP_TITLE = "股票回测视频生成器"
 APP_DATA_ROOT_NAME = "StockVideoGeneratorData"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8877
+DEFAULT_NO_PROXY = (
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    ".eastmoney.com",
+    ".sinajs.cn",
+    ".sina.com.cn",
+)
 _NULL_STREAMS: list[Any] = []
 
 
@@ -47,11 +53,59 @@ def _load_user_settings(config_dir: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _merge_no_proxy(existing: str | None) -> str:
+    values = [value.strip() for value in (existing or "").split(",") if value.strip()]
+    known = {value.lower() for value in values}
+    for value in DEFAULT_NO_PROXY:
+        if value.lower() not in known:
+            values.append(value)
+            known.add(value.lower())
+    return ",".join(values)
+
+
+def _configure_proxy_environment(user_settings: dict[str, Any]) -> None:
+    """Bridge the Windows user proxy into libraries that only inspect env vars.
+
+    Chinese market-data hosts stay direct because some local proxy routes cannot
+    reach Eastmoney, while Yahoo can still use the configured Windows proxy.
+    ``use_system_proxy: false`` in launcher.json disables automatic discovery.
+    """
+    if user_settings.get("use_system_proxy", True) is False:
+        return
+
+    configured = user_settings.get("proxy_url")
+    proxies: dict[str, str] = {}
+    if isinstance(configured, str) and configured.strip():
+        proxies = {"http": configured.strip(), "https": configured.strip()}
+    elif not any(
+        os.environ.get(name)
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    ):
+        proxies = {
+            key: value
+            for key, value in urllib.request.getproxies().items()
+            if key in {"http", "https"} and isinstance(value, str) and value
+        }
+
+    for scheme in ("http", "https"):
+        value = proxies.get(scheme)
+        if value:
+            os.environ.setdefault(f"{scheme.upper()}_PROXY", value)
+            os.environ.setdefault(f"{scheme}_proxy", value)
+
+    no_proxy = _merge_no_proxy(
+        str(user_settings.get("no_proxy") or os.environ.get("NO_PROXY") or "")
+    )
+    os.environ["NO_PROXY"] = no_proxy
+    os.environ["no_proxy"] = no_proxy
+
+
 def _configure_environment() -> tuple[Path, Path, int]:
     runtime_dir = _runtime_dir()
     config_dir = _local_app_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     user_settings = _load_user_settings(config_dir)
+    _configure_proxy_environment(user_settings)
 
     data_dir = Path(
         os.environ.get("APP_DATA_DIR")
@@ -286,29 +340,10 @@ def _run_server(port: int) -> int:
 
 
 def _run_launcher(runtime_dir: Path, log_dir: Path, port: int) -> int:
-    if _is_ready(port):
-        _log(log_dir, "Existing local service is ready; opening browser.")
-        webbrowser.open(_app_url(port))
-        return 0
+    from stock_video_generator.launcher_gui import run_launcher_gui
 
-    _log(log_dir, f"Starting local service on port {port}.")
-    process = _start_server(runtime_dir, log_dir, port)
-    if not _wait_for_server(process, port):
-        message = f"本机服务启动失败，请查看日志：{log_dir}"
-        _log(log_dir, message)
-        _message(message, error=True)
-        return 1
-
-    webbrowser.open(_app_url(port))
-    _log(log_dir, "Application is ready; browser opened.")
-    update_thread = threading.Thread(
-        target=_monitor_updates,
-        args=(runtime_dir, log_dir, process),
-        name="update-monitor",
-        daemon=True,
-    )
-    update_thread.start()
-    return process.wait()
+    _log(log_dir, "Opening desktop launch center.")
+    return run_launcher_gui(runtime_dir, log_dir, port)
 
 
 def main() -> int:
