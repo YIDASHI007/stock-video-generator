@@ -17,6 +17,7 @@ from typing import Any
 
 APP_NAME = "StockVideoGenerator"
 APP_TITLE = "股票回测视频生成器"
+APP_DATA_ROOT_NAME = "StockVideoGeneratorData"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8877
 _NULL_STREAMS: list[Any] = []
@@ -32,7 +33,7 @@ def _local_app_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA")
     if not base:
         base = str(Path.home() / "AppData" / "Local")
-    return Path(base) / APP_NAME
+    return Path(base) / APP_DATA_ROOT_NAME
 
 
 def _load_user_settings(config_dir: Path) -> dict[str, Any]:

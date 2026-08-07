@@ -15,11 +15,11 @@
 程序文件由 Velopack 管理，数据库、视频、BGM、发布账号和日志不会放进安装目录。默认位置为：
 
 ```text
-%LOCALAPPDATA%\StockVideoGenerator\UserData
-%LOCALAPPDATA%\StockVideoGenerator\Logs
+%LOCALAPPDATA%\StockVideoGeneratorData\UserData
+%LOCALAPPDATA%\StockVideoGeneratorData\Logs
 ```
 
-可在 `%LOCALAPPDATA%\StockVideoGenerator\launcher.json` 指定其他磁盘：
+可在 `%LOCALAPPDATA%\StockVideoGeneratorData\launcher.json` 指定其他磁盘：
 
 ```json
 {
