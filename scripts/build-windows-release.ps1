@@ -116,6 +116,7 @@ Write-Host "[2/6] Freezing the Python desktop application..."
     --paths (Join-Path $projectRoot "apps\api\src") `
     --collect-all akshare `
     --collect-all patchright `
+    --collect-all py_mini_racer `
     --collect-all velopack `
     --distpath $pyDistDir `
     --workpath $pyWorkDir `
@@ -165,7 +166,10 @@ $required = @(
     (Join-Path $stageDir "apps\web\dist\index.html"),
     (Join-Path $stageDir "apps\renderer\scripts\render.mjs"),
     (Join-Path $stageDir "apps\publisher-agent\dist\index.js"),
-    (Join-Path $stageDir "runtime\node\node.exe")
+    (Join-Path $stageDir "runtime\node\node.exe"),
+    (Join-Path $stageDir "apps\renderer\node_modules\@remotion\compositor-win32-x64-msvc\ffmpeg.exe"),
+    (Join-Path $stageDir "apps\renderer\node_modules\@remotion\compositor-win32-x64-msvc\ffprobe.exe"),
+    (Join-Path $stageDir "_internal\py_mini_racer\mini_racer.dll")
 )
 foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

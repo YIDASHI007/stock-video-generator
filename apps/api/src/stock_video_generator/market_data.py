@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, date, datetime
 
 from pydantic import TypeAdapter
@@ -38,8 +39,10 @@ class MarketDataService:
             self.providers["akshare"],
             yfinance,
             sina_global,
-            self.providers["global"],
         ]
+        self._health_cache: list[ProviderHealth] | None = None
+        self._health_checked_at = 0.0
+        self._health_lock = asyncio.Lock()
         self.cache = MarketDataCache(
             settings.data_dir / "market-cache",
             recent_ttl_seconds=settings.market_cache_recent_ttl_seconds,
@@ -210,7 +213,36 @@ class MarketDataService:
         return instrument, bars, actions, metadata
 
     async def health(self) -> list[ProviderHealth]:
-        results = await asyncio.gather(
-            *(provider.health_check() for provider in self.health_providers)
-        )
-        return list(results)
+        now = time.monotonic()
+        if self._health_cache is not None and now - self._health_checked_at < 300:
+            return list(self._health_cache)
+
+        async with self._health_lock:
+            now = time.monotonic()
+            if self._health_cache is not None and now - self._health_checked_at < 300:
+                return list(self._health_cache)
+            # AKShare's Eastmoney and Sina adapters can initialize the embedded
+            # V8 runtime. Initializing that DLL from two worker threads at once
+            # can terminate the entire Windows process, so health probes run in
+            # a deterministic sequence and are cached below.
+            physical = []
+            for provider in self.health_providers:
+                physical.append(await provider.health_check())
+            by_name = {result.name: result for result in physical}
+            primary = by_name["yfinance"]
+            fallback = by_name["sina_global"]
+            global_health = ProviderHealth(
+                name="global",
+                available=primary.available or fallback.available,
+                latency_ms=(
+                    primary.latency_ms if primary.available else fallback.latency_ms
+                ),
+                message=(
+                    "主数据源 yfinance 可用。"
+                    if primary.available
+                    else f"yfinance 不可用；Sina 备用源：{fallback.message}"
+                ),
+            )
+            self._health_cache = [*physical, global_health]
+            self._health_checked_at = time.monotonic()
+            return list(self._health_cache)

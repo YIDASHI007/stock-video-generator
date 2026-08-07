@@ -25,9 +25,12 @@
 {
   "data_dir": "E:\\StockVideoGeneratorData",
   "log_dir": "E:\\StockVideoGeneratorData\\logs",
-  "port": 8877
+  "port": 8877,
+  "use_system_proxy": true
 }
 ```
+
+安装版默认把 Windows 当前用户代理同步给 Python 行情库，并让本机、东方财富和新浪行情域名保持直连。需要手工指定代理时可加入 `"proxy_url": "http://127.0.0.1:端口"`；需要完全禁用自动代理发现时设置 `"use_system_proxy": false`。可通过 `"no_proxy"` 追加逗号分隔的直连主机。
 
 升级只替换安装目录中的程序文件，不会覆盖上述用户数据目录。
 

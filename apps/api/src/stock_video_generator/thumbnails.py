@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Literal
@@ -20,16 +21,38 @@ CAPTURE_SECOND = 3
 CoverVariant = Literal["portrait", "landscape"]
 
 
-def find_ffmpeg(settings: Settings) -> Path | None:
-    """在 pnpm 安装目录里定位 Remotion 自带的 ffmpeg（版本号不写死）。"""
-    candidates = sorted(
-        candidate
-        for pnpm_dir in settings.pnpm_store_dirs
-        for candidate in pnpm_dir.glob(
-            "@remotion+compositor-*/node_modules/@remotion/compositor-*/ffmpeg.exe"
-        )
+def find_media_binary(settings: Settings, filename: str) -> Path | None:
+    """Locate a packaged Remotion media binary across dev and portable layouts."""
+    renderer_modules = settings.runtime_dir / "apps" / "renderer" / "node_modules"
+    direct_candidates = (
+        settings.runtime_dir / "runtime" / "ffmpeg" / filename,
+        renderer_modules / "@remotion" / "compositor-win32-x64-msvc" / filename,
     )
-    return candidates[0] if candidates else None
+    for candidate in direct_candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+
+    patterns = (
+        "@remotion+compositor-win32-x64-msvc@*/node_modules/"
+        f"@remotion/compositor-win32-x64-msvc/{filename}",
+        "@remotion+compositor-*/node_modules/@remotion/compositor-*/" + filename,
+    )
+    for pnpm_dir in settings.pnpm_store_dirs:
+        for pattern in patterns:
+            candidates = sorted(pnpm_dir.glob(pattern))
+            if candidates:
+                return candidates[0].resolve()
+
+    system_binary = shutil.which(Path(filename).stem)
+    return Path(system_binary).resolve() if system_binary else None
+
+
+def find_ffmpeg(settings: Settings) -> Path | None:
+    return find_media_binary(settings, "ffmpeg.exe")
+
+
+def find_ffprobe(settings: Settings) -> Path | None:
+    return find_media_binary(settings, "ffprobe.exe")
 
 
 def thumbnail_path(settings: Settings, render_id: str) -> Path:

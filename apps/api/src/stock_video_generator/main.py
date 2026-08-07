@@ -75,7 +75,13 @@ from stock_video_generator.publishing import (
     publish_job_payload,
 )
 from stock_video_generator.scripting import generate_script, save_script
-from stock_video_generator.thumbnails import cover_path, ensure_thumbnail, thumbnail_path
+from stock_video_generator.thumbnails import (
+    cover_path,
+    ensure_thumbnail,
+    find_ffmpeg,
+    find_ffprobe,
+    thumbnail_path,
+)
 from stock_video_generator.topics import TopicDirective, TopicSelector
 from stock_video_generator.tts import create_tts_provider
 from stock_video_generator.universe import UniverseService
@@ -268,24 +274,21 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
                 ),
             )
         )
-        ffmpeg_candidates = [
-            candidate
-            for pnpm_dir in settings.pnpm_store_dirs
-            for candidate in pnpm_dir.glob(
-                "@remotion+compositor-*/node_modules/@remotion/compositor-*/ffmpeg.exe"
-            )
-        ]
+        ffmpeg = find_ffmpeg(settings)
+        ffprobe = find_ffprobe(settings)
+        media_tools_ready = ffmpeg is not None and ffprobe is not None
         components.append(
             ComponentHealth(
                 name="ffmpeg",
-                available=bool(ffmpeg_candidates),
+                available=media_tools_ready,
                 message=(
-                    "Remotion 内置 FFmpeg 可用，渲染后会继续执行媒体探测。"
-                    if ffmpeg_candidates
-                    else "未找到 Remotion 内置 FFmpeg，请重新运行 pnpm install。"
+                    "Remotion 内置 FFmpeg/FFprobe 可用，渲染后会继续执行媒体探测。"
+                    if media_tools_ready
+                    else "未找到 Remotion 内置 FFmpeg/FFprobe，请重新安装或运行 pnpm install。"
                 ),
                 details={
-                    "path": str(ffmpeg_candidates[0]) if ffmpeg_candidates else None,
+                    "ffmpeg_path": str(ffmpeg) if ffmpeg else None,
+                    "ffprobe_path": str(ffprobe) if ffprobe else None,
                 },
             )
         )

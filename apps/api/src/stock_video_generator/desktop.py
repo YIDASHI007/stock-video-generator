@@ -20,6 +20,14 @@ APP_TITLE = "股票回测视频生成器"
 APP_DATA_ROOT_NAME = "StockVideoGeneratorData"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8877
+DEFAULT_NO_PROXY = (
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    ".eastmoney.com",
+    ".sinajs.cn",
+    ".sina.com.cn",
+)
 _NULL_STREAMS: list[Any] = []
 
 
@@ -47,11 +55,59 @@ def _load_user_settings(config_dir: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _merge_no_proxy(existing: str | None) -> str:
+    values = [value.strip() for value in (existing or "").split(",") if value.strip()]
+    known = {value.lower() for value in values}
+    for value in DEFAULT_NO_PROXY:
+        if value.lower() not in known:
+            values.append(value)
+            known.add(value.lower())
+    return ",".join(values)
+
+
+def _configure_proxy_environment(user_settings: dict[str, Any]) -> None:
+    """Bridge the Windows user proxy into libraries that only inspect env vars.
+
+    Chinese market-data hosts stay direct because some local proxy routes cannot
+    reach Eastmoney, while Yahoo can still use the configured Windows proxy.
+    ``use_system_proxy: false`` in launcher.json disables automatic discovery.
+    """
+    if user_settings.get("use_system_proxy", True) is False:
+        return
+
+    configured = user_settings.get("proxy_url")
+    proxies: dict[str, str] = {}
+    if isinstance(configured, str) and configured.strip():
+        proxies = {"http": configured.strip(), "https": configured.strip()}
+    elif not any(
+        os.environ.get(name)
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    ):
+        proxies = {
+            key: value
+            for key, value in urllib.request.getproxies().items()
+            if key in {"http", "https"} and isinstance(value, str) and value
+        }
+
+    for scheme in ("http", "https"):
+        value = proxies.get(scheme)
+        if value:
+            os.environ.setdefault(f"{scheme.upper()}_PROXY", value)
+            os.environ.setdefault(f"{scheme}_proxy", value)
+
+    no_proxy = _merge_no_proxy(
+        str(user_settings.get("no_proxy") or os.environ.get("NO_PROXY") or "")
+    )
+    os.environ["NO_PROXY"] = no_proxy
+    os.environ["no_proxy"] = no_proxy
+
+
 def _configure_environment() -> tuple[Path, Path, int]:
     runtime_dir = _runtime_dir()
     config_dir = _local_app_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     user_settings = _load_user_settings(config_dir)
+    _configure_proxy_environment(user_settings)
 
     data_dir = Path(
         os.environ.get("APP_DATA_DIR")
