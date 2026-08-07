@@ -1,0 +1,14 @@
+{
+  "name": "stock-historical-simulation-video-generator",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @stock-video/web dev",
+    "dev:renderer": "pnpm --filter @stock-video/renderer start",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "render": "pnpm --filter @stock-video/renderer render"
+  }
+}

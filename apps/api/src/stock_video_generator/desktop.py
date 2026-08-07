@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+import traceback
+import urllib.error
+import urllib.request
+import webbrowser
+from pathlib import Path
+from typing import Any
+
+APP_NAME = "StockVideoGenerator"
+APP_TITLE = "股票回测视频生成器"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8877
+_NULL_STREAMS: list[Any] = []
+
+
+def _runtime_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[4]
+
+
+def _local_app_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        base = str(Path.home() / "AppData" / "Local")
+    return Path(base) / APP_NAME
+
+
+def _load_user_settings(config_dir: Path) -> dict[str, Any]:
+    path = config_dir / "launcher.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _configure_environment() -> tuple[Path, Path, int]:
+    runtime_dir = _runtime_dir()
+    config_dir = _local_app_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    user_settings = _load_user_settings(config_dir)
+
+    data_dir = Path(
+        os.environ.get("APP_DATA_DIR")
+        or user_settings.get("data_dir")
+        or config_dir / "UserData"
+    ).expanduser().resolve()
+    log_dir = Path(
+        os.environ.get("APP_LOG_DIR")
+        or user_settings.get("log_dir")
+        or config_dir / "Logs"
+    ).expanduser().resolve()
+    port = int(os.environ.get("APP_PORT") or user_settings.get("port") or DEFAULT_PORT)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    os.environ["APP_ENV"] = "production"
+    os.environ["APP_HOST"] = DEFAULT_HOST
+    os.environ["APP_PORT"] = str(port)
+    os.environ["APP_RUNTIME_DIR"] = str(runtime_dir)
+    os.environ["APP_DATA_DIR"] = str(data_dir)
+    os.environ["APP_LOG_DIR"] = str(log_dir)
+    os.environ["APP_WEB_DIST_DIR"] = str(runtime_dir / "apps" / "web" / "dist")
+    packaged_node = runtime_dir / "runtime" / "node" / "node.exe"
+    if packaged_node.is_file():
+        os.environ["NODE_EXECUTABLE"] = str(packaged_node)
+    return runtime_dir, log_dir, port
+
+
+def _log(log_dir: Path, message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with (log_dir / "desktop-launcher.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def _bootstrap_log(message: str) -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        directory = _local_app_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with (directory / "bootstrap.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def _ensure_standard_streams() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is not None:
+            continue
+        stream = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        _NULL_STREAMS.append(stream)
+        setattr(sys, name, stream)
+
+
+def _message(text: str, *, error: bool = False, question: bool = False) -> bool:
+    try:
+        import ctypes
+
+        flags = 0x10 if error else 0x40
+        if question:
+            flags = 0x24
+        result = ctypes.windll.user32.MessageBoxW(None, text, APP_TITLE, flags)
+        return result == 6
+    except Exception:
+        return False
+
+
+def _health_url(port: int) -> str:
+    return f"http://{DEFAULT_HOST}:{port}/ready"
+
+
+def _app_url(port: int) -> str:
+    return f"http://{DEFAULT_HOST}:{port}/"
+
+
+def _is_ready(port: int) -> bool:
+    try:
+        with urllib.request.urlopen(_health_url(port), timeout=2) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def _self_command(*arguments: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *arguments]
+    return [sys.executable, "-m", "stock_video_generator.desktop", *arguments]
+
+
+def _start_server(runtime_dir: Path, log_dir: Path, port: int) -> subprocess.Popen[bytes]:
+    creation_flags = 0
+    if sys.platform == "win32":
+        creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    stdout = (log_dir / "desktop-api.stdout.log").open("ab")
+    stderr = (log_dir / "desktop-api.stderr.log").open("ab")
+    process = subprocess.Popen(
+        _self_command("--serve", "--port", str(port)),
+        cwd=runtime_dir,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=stdout,
+        stderr=stderr,
+        creationflags=creation_flags,
+    )
+    stdout.close()
+    stderr.close()
+    return process
+
+
+def _wait_for_server(process: subprocess.Popen[bytes], port: int, timeout: float = 90) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        if _is_ready(port):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _update_repo_url(runtime_dir: Path) -> str | None:
+    configured = os.environ.get("STOCK_VIDEO_UPDATE_URL")
+    if configured:
+        return configured.strip() or None
+    path = runtime_dir / "resources" / "update.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = payload.get("github_repo_url") if isinstance(payload, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _check_and_apply_update(
+    runtime_dir: Path,
+    log_dir: Path,
+    process: subprocess.Popen[bytes],
+) -> bool:
+    repo_url = _update_repo_url(runtime_dir)
+    if not repo_url:
+        return False
+    try:
+        from velopack import GithubSource, UpdateManager
+
+        manager = UpdateManager(GithubSource(repo_url))
+        if manager.get_is_portable():
+            return False
+        update = manager.check_for_updates()
+        if update is None:
+            return False
+        if not _message("发现新版本。现在下载并自动安装吗？", question=True):
+            return False
+        manager.download_updates(update)
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        manager.apply_updates_and_restart(update)
+        return True
+    except Exception as exc:
+        _log(log_dir, f"Update check failed: {exc!r}")
+        return False
+
+
+def _monitor_updates(
+    runtime_dir: Path,
+    log_dir: Path,
+    process: subprocess.Popen[bytes],
+) -> None:
+    if _check_and_apply_update(runtime_dir, log_dir, process):
+        return
+    while process.poll() is None:
+        time.sleep(6 * 60 * 60)
+        if _check_and_apply_update(runtime_dir, log_dir, process):
+            return
+
+
+def _run_server(port: int) -> int:
+    _bootstrap_log("Importing uvicorn.")
+    import uvicorn
+
+    if getattr(sys, "frozen", False):
+        startup_modules = (
+            "fastapi",
+            "sqlalchemy",
+            "stock_video_generator.api_models",
+            "stock_video_generator.config",
+            "stock_video_generator.database",
+            "stock_video_generator.errors",
+            "stock_video_generator.jobs",
+            "stock_video_generator.logging_config",
+            "stock_video_generator.market_data",
+            "stock_video_generator.models",
+            "stock_video_generator.output_retention",
+            "stock_video_generator.pipeline",
+            "stock_video_generator.publish_batches",
+            "stock_video_generator.publish_manager",
+            "stock_video_generator.publishing",
+            "stock_video_generator.scripting",
+            "stock_video_generator.thumbnails",
+            "stock_video_generator.topics",
+            "stock_video_generator.tts",
+            "stock_video_generator.universe",
+            "stock_video_generator.visualization",
+        )
+        for module_name in startup_modules:
+            _bootstrap_log(f"Importing {module_name}.")
+            importlib.import_module(module_name)
+
+    _bootstrap_log("Importing FastAPI application.")
+    from stock_video_generator.main import app
+
+    _bootstrap_log("FastAPI application imported; entering uvicorn.run().")
+    uvicorn.run(
+        app,
+        host=DEFAULT_HOST,
+        port=port,
+        reload=False,
+        access_log=False,
+        log_config=None,
+    )
+    return 0
+
+
+def _run_launcher(runtime_dir: Path, log_dir: Path, port: int) -> int:
+    if _is_ready(port):
+        _log(log_dir, "Existing local service is ready; opening browser.")
+        webbrowser.open(_app_url(port))
+        return 0
+
+    _log(log_dir, f"Starting local service on port {port}.")
+    process = _start_server(runtime_dir, log_dir, port)
+    if not _wait_for_server(process, port):
+        message = f"本机服务启动失败，请查看日志：{log_dir}"
+        _log(log_dir, message)
+        _message(message, error=True)
+        return 1
+
+    webbrowser.open(_app_url(port))
+    _log(log_dir, "Application is ready; browser opened.")
+    update_thread = threading.Thread(
+        target=_monitor_updates,
+        args=(runtime_dir, log_dir, process),
+        name="update-monitor",
+        daemon=True,
+    )
+    update_thread.start()
+    return process.wait()
+
+
+def main() -> int:
+    _ensure_standard_streams()
+    _bootstrap_log(f"Starting with arguments: {sys.argv[1:]!r}")
+    is_server_process = "--serve" in sys.argv[1:]
+    if not is_server_process:
+        try:
+            from velopack import App
+
+            App().set_auto_apply_on_startup(True).run()
+        except Exception:
+            # Development and unpackaged builds run in portable mode.
+            pass
+
+    _bootstrap_log("Configuring runtime environment.")
+    runtime_dir, log_dir, default_port = _configure_environment()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--port", type=int, default=default_port)
+    arguments, _ = parser.parse_known_args()
+    if arguments.serve:
+        _bootstrap_log(f"Starting API service on port {arguments.port}.")
+        return _run_server(arguments.port)
+    _bootstrap_log("Starting desktop launcher.")
+    return _run_launcher(runtime_dir, log_dir, arguments.port)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except BaseException:
+        _bootstrap_log(traceback.format_exc())
+        raise

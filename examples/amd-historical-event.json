@@ -1,0 +1,12 @@
+{
+  "event_date": "2023-12-06",
+  "effective_trading_date": "2023-12-06",
+  "event_type": "AI 芯片 · 产品发布",
+  "title": "AMD 正式发布 Instinct MI300 系列",
+  "summary": "微软、Meta、Oracle 等展示或计划采用 MI300X，AMD 推进生成式 AI 数据中心部署。",
+  "source_label": "AMD Newsroom",
+  "source_url": "https://www.amd.com/en/newsroom/press-releases/2023-12-6-amd-delivers-leadership-portfolio-of-data-center-a.html",
+  "confidence": "high",
+  "impact_label": "事件后 20 个交易日 +18.63%",
+  "tone": "positive"
+}

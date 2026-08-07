@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-video-generator"
+version = "0.1.0"
+description = "Deterministic stock historical simulation and video generation service"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+dependencies = [
+  "akshare>=1.16",
+  "edge-tts>=7.0",
+  "fastapi>=0.115",
+  "httpx>=0.28",
+  "mutagen>=1.47",
+  "numpy>=2.1",
+  "pandas>=2.2",
+  "patchright>=1.56",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "python-multipart>=0.0.20",
+  "sqlalchemy>=2.0",
+  "tenacity>=9.0",
+  "uvicorn[standard]>=0.34",
+  "yfinance>=0.2.54"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=6.0",
+  "ruff>=0.9"
+]
+build = [
+  "pyinstaller==6.21.0",
+  "velopack==1.2.0"
+]
+
+[project.scripts]
+stock-video-api = "stock_video_generator.main:run"
+stock-video-cli = "stock_video_generator.cli:main"
+stock-video-desktop = "stock_video_generator.desktop:main"
+
+[tool.setuptools]
+package-dir = {"" = "apps/api/src"}
+
+[tool.setuptools.packages.find]
+where = ["apps/api/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not integration'"
+markers = [
+  "integration: requires external market-data access",
+  "render: requires Node.js and the renderer dependencies"
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

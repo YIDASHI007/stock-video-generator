@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "DividendPolicy": {
+      "enum": [
+        "ignore",
+        "cash",
+        "reinvest"
+      ],
+      "title": "DividendPolicy",
+      "type": "string"
+    },
+    "ExecutionPrice": {
+      "enum": [
+        "open",
+        "close"
+      ],
+      "title": "ExecutionPrice",
+      "type": "string"
+    },
+    "FeePolicy": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "commission_rate": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Commission Rate",
+          "type": "number"
+        },
+        "minimum_commission": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Minimum Commission",
+          "type": "number"
+        },
+        "stamp_duty_rate": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Stamp Duty Rate",
+          "type": "number"
+        }
+      },
+      "title": "FeePolicy",
+      "type": "object"
+    },
+    "NonTradingDayPolicy": {
+      "enum": [
+        "next_trading_day",
+        "previous_trading_day",
+        "reject"
+      ],
+      "title": "NonTradingDayPolicy",
+      "type": "string"
+    },
+    "ShareMode": {
+      "enum": [
+        "fractional",
+        "integer",
+        "market_lot"
+      ],
+      "title": "ShareMode",
+      "type": "string"
+    },
+    "VideoConfig": {
+      "properties": {
+        "duration_seconds": {
+          "default": 60,
+          "maximum": 180,
+          "minimum": 15,
+          "title": "Duration Seconds",
+          "type": "integer"
+        },
+        "fps": {
+          "const": 30,
+          "default": 30,
+          "title": "Fps",
+          "type": "integer"
+        },
+        "width": {
+          "default": 1920,
+          "maximum": 3840,
+          "minimum": 640,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "default": 1080,
+          "maximum": 2160,
+          "minimum": 360,
+          "title": "Height",
+          "type": "integer"
+        },
+        "theme": {
+          "default": "dark",
+          "enum": [
+            "dark",
+            "light"
+          ],
+          "title": "Theme",
+          "type": "string"
+        },
+        "voice_enabled": {
+          "default": false,
+          "title": "Voice Enabled",
+          "type": "boolean"
+        },
+        "voice": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voice"
+        }
+      },
+      "title": "VideoConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "buy_date": {
+      "format": "date",
+      "title": "Buy Date",
+      "type": "string"
+    },
+    "end_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "const": "latest",
+          "type": "string"
+        }
+      ],
+      "default": "latest",
+      "title": "End Date"
+    },
+    "initial_capital": {
+      "exclusiveMinimum": 0,
+      "title": "Initial Capital",
+      "type": "number"
+    },
+    "capital_currency": {
+      "title": "Capital Currency",
+      "type": "string"
+    },
+    "execution_price": {
+      "$ref": "#/$defs/ExecutionPrice",
+      "default": "close"
+    },
+    "non_trading_day_policy": {
+      "$ref": "#/$defs/NonTradingDayPolicy",
+      "default": "next_trading_day"
+    },
+    "share_mode": {
+      "$ref": "#/$defs/ShareMode",
+      "default": "fractional"
+    },
+    "dividend_policy": {
+      "$ref": "#/$defs/DividendPolicy",
+      "default": "reinvest"
+    },
+    "fee_policy": {
+      "$ref": "#/$defs/FeePolicy"
+    },
+    "video": {
+      "$ref": "#/$defs/VideoConfig"
+    }
+  },
+  "required": [
+    "symbol",
+    "buy_date",
+    "initial_capital",
+    "capital_currency"
+  ],
+  "title": "SimulationRequest",
+  "type": "object"
+}

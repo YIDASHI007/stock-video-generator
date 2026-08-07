@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "DataValidationResult": {
+      "properties": {
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "data_start": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Start"
+        },
+        "data_end": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data End"
+        },
+        "trading_days": {
+          "default": 0,
+          "title": "Trading Days",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "valid"
+      ],
+      "title": "DataValidationResult",
+      "type": "object"
+    },
+    "Instrument": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "market": {
+          "$ref": "#/$defs/Market"
+        },
+        "exchange": {
+          "title": "Exchange",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        },
+        "market_lot": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Market Lot",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol",
+        "name",
+        "market",
+        "exchange",
+        "currency",
+        "timezone",
+        "source"
+      ],
+      "title": "Instrument",
+      "type": "object"
+    },
+    "Market": {
+      "enum": [
+        "CN",
+        "HK",
+        "US",
+        "CRYPTO"
+      ],
+      "title": "Market",
+      "type": "string"
+    },
+    "SimulationEvent": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "shares_before": {
+          "title": "Shares Before",
+          "type": "number"
+        },
+        "shares_after": {
+          "title": "Shares After",
+          "type": "number"
+        },
+        "cash_before": {
+          "title": "Cash Before",
+          "type": "number"
+        },
+        "cash_after": {
+          "title": "Cash After",
+          "type": "number"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        }
+      },
+      "required": [
+        "date",
+        "event_type",
+        "description",
+        "shares_before",
+        "shares_after",
+        "cash_before",
+        "cash_after"
+      ],
+      "title": "SimulationEvent",
+      "type": "object"
+    },
+    "SimulationPoint": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "close": {
+          "title": "Close",
+          "type": "number"
+        },
+        "shares": {
+          "title": "Shares",
+          "type": "number"
+        },
+        "cash": {
+          "title": "Cash",
+          "type": "number"
+        },
+        "portfolio_value": {
+          "title": "Portfolio Value",
+          "type": "number"
+        },
+        "total_return_pct": {
+          "title": "Total Return Pct",
+          "type": "number"
+        },
+        "drawdown_pct": {
+          "title": "Drawdown Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "date",
+        "close",
+        "shares",
+        "cash",
+        "portfolio_value",
+        "total_return_pct",
+        "drawdown_pct"
+      ],
+      "title": "SimulationPoint",
+      "type": "object"
+    },
+    "SimulationSummary": {
+      "properties": {
+        "actual_buy_date": {
+          "format": "date",
+          "title": "Actual Buy Date",
+          "type": "string"
+        },
+        "buy_price": {
+          "title": "Buy Price",
+          "type": "number"
+        },
+        "initial_shares": {
+          "title": "Initial Shares",
+          "type": "number"
+        },
+        "final_shares": {
+          "title": "Final Shares",
+          "type": "number"
+        },
+        "final_cash": {
+          "title": "Final Cash",
+          "type": "number"
+        },
+        "final_value": {
+          "title": "Final Value",
+          "type": "number"
+        },
+        "total_return_pct": {
+          "title": "Total Return Pct",
+          "type": "number"
+        },
+        "max_drawdown_pct": {
+          "title": "Max Drawdown Pct",
+          "type": "number"
+        },
+        "best_value": {
+          "title": "Best Value",
+          "type": "number"
+        },
+        "worst_value": {
+          "title": "Worst Value",
+          "type": "number"
+        },
+        "dividend_total": {
+          "title": "Dividend Total",
+          "type": "number"
+        },
+        "total_fees": {
+          "title": "Total Fees",
+          "type": "number"
+        }
+      },
+      "required": [
+        "actual_buy_date",
+        "buy_price",
+        "initial_shares",
+        "final_shares",
+        "final_cash",
+        "final_value",
+        "total_return_pct",
+        "max_drawdown_pct",
+        "best_value",
+        "worst_value",
+        "dividend_total",
+        "total_fees"
+      ],
+      "title": "SimulationSummary",
+      "type": "object"
+    },
+    "SourceMetadata": {
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "fetched_at": {
+          "format": "date-time",
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "request_parameters": {
+          "additionalProperties": true,
+          "title": "Request Parameters",
+          "type": "object"
+        },
+        "cache_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Key"
+        },
+        "cache_hit": {
+          "default": false,
+          "title": "Cache Hit",
+          "type": "boolean"
+        },
+        "raw_response_summary": {
+          "additionalProperties": true,
+          "title": "Raw Response Summary",
+          "type": "object"
+        }
+      },
+      "required": [
+        "provider",
+        "fetched_at",
+        "request_parameters"
+      ],
+      "title": "SourceMetadata",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "simulation_id": {
+      "title": "Simulation Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "instrument": {
+      "$ref": "#/$defs/Instrument"
+    },
+    "assumptions": {
+      "additionalProperties": true,
+      "title": "Assumptions",
+      "type": "object"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceMetadata"
+    },
+    "validation": {
+      "$ref": "#/$defs/DataValidationResult"
+    },
+    "summary": {
+      "$ref": "#/$defs/SimulationSummary"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/SimulationEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "series": {
+      "items": {
+        "$ref": "#/$defs/SimulationPoint"
+      },
+      "title": "Series",
+      "type": "array"
+    }
+  },
+  "required": [
+    "simulation_id",
+    "instrument",
+    "assumptions",
+    "source",
+    "validation",
+    "summary",
+    "events",
+    "series"
+  ],
+  "title": "SimulationResult",
+  "type": "object"
+}

@@ -1,0 +1,691 @@
+{
+  "$defs": {
+    "BgmSpec": {
+      "additionalProperties": false,
+      "description": "背景音乐：整条时间线循环播放，结尾淡出；音量低于人声。",
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "source_path": {
+          "title": "Source Path",
+          "type": "string"
+        },
+        "volume": {
+          "default": 0.15,
+          "title": "Volume",
+          "type": "number"
+        },
+        "fade_out_seconds": {
+          "default": 2.0,
+          "title": "Fade Out Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "file",
+        "source_path"
+      ],
+      "title": "BgmSpec",
+      "type": "object"
+    },
+    "ChartSpec": {
+      "properties": {
+        "type": {
+          "const": "portfolio_value_line",
+          "default": "portfolio_value_line",
+          "title": "Type",
+          "type": "string"
+        },
+        "line_color_positive": {
+          "default": "#3ee69b",
+          "title": "Line Color Positive",
+          "type": "string"
+        },
+        "line_color_negative": {
+          "default": "#ff5d57",
+          "title": "Line Color Negative",
+          "type": "string"
+        },
+        "background": {
+          "default": "#0b1118",
+          "title": "Background",
+          "type": "string"
+        },
+        "show_grid": {
+          "default": true,
+          "title": "Show Grid",
+          "type": "boolean"
+        },
+        "show_current_dot": {
+          "default": true,
+          "title": "Show Current Dot",
+          "type": "boolean"
+        },
+        "show_glow": {
+          "default": true,
+          "title": "Show Glow",
+          "type": "boolean"
+        },
+        "show_date": {
+          "default": true,
+          "title": "Show Date",
+          "type": "boolean"
+        },
+        "show_value": {
+          "default": true,
+          "title": "Show Value",
+          "type": "boolean"
+        },
+        "show_return": {
+          "default": true,
+          "title": "Show Return",
+          "type": "boolean"
+        },
+        "window_days": {
+          "default": 250,
+          "title": "Window Days",
+          "type": "integer"
+        }
+      },
+      "title": "ChartSpec",
+      "type": "object"
+    },
+    "ComplianceSpec": {
+      "properties": {
+        "exchange": {
+          "title": "Exchange",
+          "type": "string"
+        },
+        "fetched_at": {
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "actual_buy_date": {
+          "format": "date",
+          "title": "Actual Buy Date",
+          "type": "string"
+        },
+        "execution_price": {
+          "title": "Execution Price",
+          "type": "string"
+        },
+        "buy_price": {
+          "title": "Buy Price",
+          "type": "number"
+        },
+        "fees_included": {
+          "title": "Fees Included",
+          "type": "boolean"
+        },
+        "dividend_policy": {
+          "title": "Dividend Policy",
+          "type": "string"
+        },
+        "share_mode": {
+          "title": "Share Mode",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        }
+      },
+      "required": [
+        "exchange",
+        "fetched_at",
+        "actual_buy_date",
+        "execution_price",
+        "buy_price",
+        "fees_included",
+        "dividend_policy",
+        "share_mode",
+        "currency"
+      ],
+      "title": "ComplianceSpec",
+      "type": "object"
+    },
+    "CompositionSpec": {
+      "properties": {
+        "width": {
+          "default": 1920,
+          "maximum": 3840,
+          "minimum": 640,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "default": 1080,
+          "maximum": 2160,
+          "minimum": 360,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "const": 30,
+          "default": 30,
+          "title": "Fps",
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "maximum": 180,
+          "minimum": 10,
+          "title": "Duration Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "duration_seconds"
+      ],
+      "title": "CompositionSpec",
+      "type": "object"
+    },
+    "HistoricalEvent": {
+      "additionalProperties": false,
+      "description": "经来源核验、可对齐到交易时间轴的历史事件。",
+      "properties": {
+        "event_date": {
+          "format": "date",
+          "title": "Event Date",
+          "type": "string"
+        },
+        "effective_trading_date": {
+          "format": "date",
+          "title": "Effective Trading Date",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "source_label": {
+          "title": "Source Label",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "confidence": {
+          "default": "high",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "impact_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Impact Label"
+        },
+        "tone": {
+          "default": "neutral",
+          "enum": [
+            "positive",
+            "negative",
+            "neutral"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_date",
+        "effective_trading_date",
+        "event_type",
+        "title",
+        "summary",
+        "source_label",
+        "source_url"
+      ],
+      "title": "HistoricalEvent",
+      "type": "object"
+    },
+    "Milestone": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "return_pct": {
+          "title": "Return Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "date",
+        "type",
+        "label",
+        "value",
+        "return_pct"
+      ],
+      "title": "Milestone",
+      "type": "object"
+    },
+    "NarrationAudioClipSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "hook",
+            "segment",
+            "finale",
+            "cta"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "source_path": {
+          "title": "Source Path",
+          "type": "string"
+        },
+        "start_s": {
+          "title": "Start S",
+          "type": "number"
+        },
+        "duration_s": {
+          "title": "Duration S",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "file",
+        "source_path",
+        "start_s",
+        "duration_s"
+      ],
+      "title": "NarrationAudioClipSpec",
+      "type": "object"
+    },
+    "NarrationSegmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor_date": {
+          "format": "date",
+          "title": "Anchor Date",
+          "type": "string"
+        },
+        "subtitle": {
+          "title": "Subtitle",
+          "type": "string"
+        },
+        "emphasis": {
+          "enum": [
+            "surge",
+            "crash",
+            "sideways",
+            "recovery"
+          ],
+          "title": "Emphasis",
+          "type": "string"
+        },
+        "audio_id": {
+          "title": "Audio Id",
+          "type": "string"
+        },
+        "arrive_s": {
+          "title": "Arrive S",
+          "type": "number"
+        }
+      },
+      "required": [
+        "anchor_date",
+        "subtitle",
+        "emphasis",
+        "audio_id",
+        "arrive_s"
+      ],
+      "title": "NarrationSegmentSpec",
+      "type": "object"
+    },
+    "NarrationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "voice_id": {
+          "title": "Voice Id",
+          "type": "string"
+        },
+        "gap_s": {
+          "title": "Gap S",
+          "type": "number"
+        },
+        "tail_s": {
+          "title": "Tail S",
+          "type": "number"
+        },
+        "hook_end_s": {
+          "title": "Hook End S",
+          "type": "number"
+        },
+        "chart_end_s": {
+          "title": "Chart End S",
+          "type": "number"
+        },
+        "total_duration_s": {
+          "title": "Total Duration S",
+          "type": "number"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/NarrationSegmentSpec"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "audio": {
+          "items": {
+            "$ref": "#/$defs/NarrationAudioClipSpec"
+          },
+          "title": "Audio",
+          "type": "array"
+        }
+      },
+      "required": [
+        "voice_id",
+        "gap_s",
+        "tail_s",
+        "hook_end_s",
+        "chart_end_s",
+        "total_duration_s",
+        "segments",
+        "audio"
+      ],
+      "title": "NarrationSpec",
+      "type": "object"
+    },
+    "StoryHookSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "template_id": {
+          "title": "Template Id",
+          "type": "string"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "display_asset_name": {
+          "title": "Display Asset Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "template_id",
+        "category",
+        "text",
+        "display_asset_name"
+      ],
+      "title": "StoryHookSpec",
+      "type": "object"
+    },
+    "TimelineSpec": {
+      "properties": {
+        "intro_seconds": {
+          "title": "Intro Seconds",
+          "type": "number"
+        },
+        "chart_seconds": {
+          "title": "Chart Seconds",
+          "type": "number"
+        },
+        "outro_seconds": {
+          "title": "Outro Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "intro_seconds",
+        "chart_seconds",
+        "outro_seconds"
+      ],
+      "title": "TimelineSpec",
+      "type": "object"
+    },
+    "VisualizationInstrument": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "symbol"
+      ],
+      "title": "VisualizationInstrument",
+      "type": "object"
+    },
+    "VisualizationPoint": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "return_pct": {
+          "title": "Return Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "date",
+        "value",
+        "return_pct"
+      ],
+      "title": "VisualizationPoint",
+      "type": "object"
+    },
+    "VisualizationSummary": {
+      "properties": {
+        "initial_capital": {
+          "title": "Initial Capital",
+          "type": "number"
+        },
+        "final_value": {
+          "title": "Final Value",
+          "type": "number"
+        },
+        "return_pct": {
+          "title": "Return Pct",
+          "type": "number"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        }
+      },
+      "required": [
+        "initial_capital",
+        "final_value",
+        "return_pct",
+        "currency"
+      ],
+      "title": "VisualizationSummary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "template_version": {
+      "const": "v1",
+      "default": "v1",
+      "title": "Template Version",
+      "type": "string"
+    },
+    "simulation_id": {
+      "title": "Simulation Id",
+      "type": "string"
+    },
+    "composition": {
+      "$ref": "#/$defs/CompositionSpec"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "subtitle": {
+      "title": "Subtitle",
+      "type": "string"
+    },
+    "instrument": {
+      "$ref": "#/$defs/VisualizationInstrument"
+    },
+    "summary": {
+      "$ref": "#/$defs/VisualizationSummary"
+    },
+    "story_hook": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StoryHookSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "timeline": {
+      "$ref": "#/$defs/TimelineSpec"
+    },
+    "chart": {
+      "$ref": "#/$defs/ChartSpec"
+    },
+    "milestones": {
+      "items": {
+        "$ref": "#/$defs/Milestone"
+      },
+      "title": "Milestones",
+      "type": "array"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/HistoricalEvent"
+      },
+      "maxItems": 5,
+      "title": "Events",
+      "type": "array"
+    },
+    "series": {
+      "items": {
+        "$ref": "#/$defs/VisualizationPoint"
+      },
+      "title": "Series",
+      "type": "array"
+    },
+    "source_label": {
+      "title": "Source Label",
+      "type": "string"
+    },
+    "calculation_label": {
+      "title": "Calculation Label",
+      "type": "string"
+    },
+    "compliance": {
+      "$ref": "#/$defs/ComplianceSpec"
+    },
+    "narration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NarrationSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "bgm": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BgmSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "disclaimer": {
+      "default": "历史数据模拟，仅供信息展示，不构成投资建议。",
+      "title": "Disclaimer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "simulation_id",
+    "composition",
+    "title",
+    "subtitle",
+    "instrument",
+    "summary",
+    "timeline",
+    "chart",
+    "milestones",
+    "series",
+    "source_label",
+    "calculation_label",
+    "compliance"
+  ],
+  "title": "VisualizationSpec",
+  "type": "object"
+}

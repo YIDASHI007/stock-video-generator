@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "template_version": "v1",
+  "simulation_id": "offline-render-fixture",
+  "composition": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "duration_seconds": 15
+  },
+  "title": "离线渲染测试：投入 100,000 元",
+  "subtitle": "固定 fixture · 仅验证视频管线",
+  "instrument": {
+    "name": "测试股票（非生产数据）",
+    "symbol": "FIXTURE"
+  },
+  "summary": {
+    "initial_capital": 100000,
+    "final_value": 117000,
+    "return_pct": 17,
+    "currency": "CNY"
+  },
+  "timeline": {
+    "intro_seconds": 2,
+    "chart_seconds": 10,
+    "outro_seconds": 3
+  },
+  "chart": {
+    "type": "portfolio_value_line",
+    "line_color_positive": "#3ee69b",
+    "line_color_negative": "#ff5d57",
+    "background": "#0b1118",
+    "show_grid": true,
+    "show_current_dot": true,
+    "show_glow": true,
+    "show_date": true,
+    "show_value": true,
+    "show_return": true
+  },
+  "milestones": [],
+  "series": [
+    {"date": "2021-01-04", "value": 100000, "return_pct": 0},
+    {"date": "2021-04-01", "value": 108000, "return_pct": 8},
+    {"date": "2021-07-01", "value": 92000, "return_pct": -8},
+    {"date": "2021-10-01", "value": 104000, "return_pct": 4},
+    {"date": "2022-01-04", "value": 117000, "return_pct": 17}
+  ],
+  "source_label": "数据来源：离线单元测试 fixture",
+  "calculation_label": "用途：仅验证确定性逐帧渲染，不进入生产流程",
+  "compliance": {
+    "exchange": "TEST",
+    "fetched_at": "2025-01-03T00:00:00Z",
+    "actual_buy_date": "2021-01-04",
+    "execution_price": "close",
+    "buy_price": 100,
+    "fees_included": false,
+    "dividend_policy": "ignore",
+    "share_mode": "fractional",
+    "currency": "CNY"
+  },
+  "disclaimer": "历史数据模拟，仅供信息展示，不构成投资建议。"
+}

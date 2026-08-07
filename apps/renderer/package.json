@@ -1,0 +1,30 @@
+{
+  "name": "@stock-video/renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "remotion studio src/index.ts",
+    "build": "tsc --noEmit",
+    "test": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "render": "node scripts/render.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.499",
+    "@remotion/cli": "4.0.499",
+    "@remotion/renderer": "4.0.499",
+    "@stock-video/schemas": "workspace:*",
+    "@stock-video/video-template": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.499"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
+

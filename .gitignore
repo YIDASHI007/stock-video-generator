@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+.pnpm-store/
+dist/
+build/
+Releases/
+.vite/
+.remotion/
+# 所有运行数据都属于用户：数据库、视频、BGM、发布账号、浏览器登录态和证据文件。
+data/
+logs/
+*.mp4
+*.tsbuildinfo
