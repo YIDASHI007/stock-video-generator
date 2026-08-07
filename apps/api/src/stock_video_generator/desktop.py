@@ -6,12 +6,10 @@ import json
 import os
 import subprocess
 import sys
-import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
-import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -342,29 +340,10 @@ def _run_server(port: int) -> int:
 
 
 def _run_launcher(runtime_dir: Path, log_dir: Path, port: int) -> int:
-    if _is_ready(port):
-        _log(log_dir, "Existing local service is ready; opening browser.")
-        webbrowser.open(_app_url(port))
-        return 0
+    from stock_video_generator.launcher_gui import run_launcher_gui
 
-    _log(log_dir, f"Starting local service on port {port}.")
-    process = _start_server(runtime_dir, log_dir, port)
-    if not _wait_for_server(process, port):
-        message = f"本机服务启动失败，请查看日志：{log_dir}"
-        _log(log_dir, message)
-        _message(message, error=True)
-        return 1
-
-    webbrowser.open(_app_url(port))
-    _log(log_dir, "Application is ready; browser opened.")
-    update_thread = threading.Thread(
-        target=_monitor_updates,
-        args=(runtime_dir, log_dir, process),
-        name="update-monitor",
-        daemon=True,
-    )
-    update_thread.start()
-    return process.wait()
+    _log(log_dir, "Opening desktop launch center.")
+    return run_launcher_gui(runtime_dir, log_dir, port)
 
 
 def main() -> int:
