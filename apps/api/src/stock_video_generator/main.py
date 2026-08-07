@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 
+from stock_video_generator import __version__
 from stock_video_generator.api_models import (
     ComponentHealth,
     HealthResponse,
@@ -151,7 +152,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="股票历史回测视频生成器 API",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
     app.state.settings = settings
