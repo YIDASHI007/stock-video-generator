@@ -26,6 +26,57 @@ $pyWorkDir = Join-Path $OutputRoot "pyinstaller-work"
 $releaseDir = Join-Path $OutputRoot "Releases"
 $specDir = Join-Path $OutputRoot "spec"
 
+function Convert-PnpmDeployToPortableNodeModules {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackageRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SelfPackageName
+    )
+
+    $packageRootPath = [System.IO.Path]::GetFullPath($PackageRoot)
+    $modulesPath = Join-Path $packageRootPath "node_modules"
+    $indexPath = Join-Path $modulesPath ".pnpm\node_modules"
+    $portablePath = Join-Path $packageRootPath "node_modules-portable"
+    $legacyPath = Join-Path $packageRootPath "node_modules-pnpm"
+    if (-not (Test-Path -LiteralPath $indexPath -PathType Container)) {
+        throw "pnpm deploy index was not found: $indexPath"
+    }
+    foreach ($candidate in @($modulesPath, $portablePath, $legacyPath)) {
+        $candidatePath = [System.IO.Path]::GetFullPath($candidate)
+        if (-not $candidatePath.StartsWith(
+            $packageRootPath,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Portable dependency path escaped package root: $candidatePath"
+        }
+    }
+
+    New-Item -ItemType Directory -Path $portablePath -Force | Out-Null
+    foreach ($entry in Get-ChildItem -LiteralPath $indexPath -Force) {
+        if ($entry.Name.StartsWith("@")) {
+            $scopeTarget = Join-Path $portablePath $entry.Name
+            New-Item -ItemType Directory -Path $scopeTarget -Force | Out-Null
+            foreach ($package in Get-ChildItem -LiteralPath $entry.FullName -Force) {
+                $qualifiedName = "$($entry.Name)/$($package.Name)"
+                if ($qualifiedName -eq $SelfPackageName) {
+                    continue
+                }
+                Copy-Item -LiteralPath $package.FullName `
+                    -Destination $scopeTarget -Recurse -Force
+            }
+            continue
+        }
+        Copy-Item -LiteralPath $entry.FullName `
+            -Destination $portablePath -Recurse -Force
+    }
+
+    Move-Item -LiteralPath $modulesPath -Destination $legacyPath
+    Move-Item -LiteralPath $portablePath -Destination $modulesPath
+    Remove-Item -LiteralPath $legacyPath -Recurse -Force
+}
+
 if (Test-Path -LiteralPath $OutputRoot) {
     Remove-Item -LiteralPath $OutputRoot -Recurse -Force
 }
@@ -82,6 +133,12 @@ $publisherTarget = Join-Path $stageDir "apps\publisher-agent"
 if ($LASTEXITCODE -ne 0) { throw "Renderer deployment failed." }
 & pnpm --dir $projectRoot --filter "@stock-video/publisher-agent" deploy --prod --legacy $publisherTarget
 if ($LASTEXITCODE -ne 0) { throw "Publisher deployment failed." }
+Convert-PnpmDeployToPortableNodeModules `
+    -PackageRoot $rendererTarget `
+    -SelfPackageName "@stock-video/renderer"
+Convert-PnpmDeployToPortableNodeModules `
+    -PackageRoot $publisherTarget `
+    -SelfPackageName "@stock-video/publisher-agent"
 
 Write-Host "[4/6] Staging the production frontend and Node.js..."
 $webTarget = Join-Path $stageDir "apps\web\dist"
@@ -114,6 +171,17 @@ foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Staged runtime is missing: $path"
     }
+}
+$stagedNode = Join-Path $stageDir "runtime\node\node.exe"
+Push-Location $rendererTarget
+try {
+    & $stagedNode -e `
+        "import('@remotion/renderer').then(()=>console.log('Remotion runtime import OK')).catch((error)=>{console.error(error);process.exit(1)})"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Staged Remotion runtime cannot resolve its production dependencies."
+    }
+} finally {
+    Pop-Location
 }
 
 Write-Host "[6/6] Building the Velopack installer and delta package..."

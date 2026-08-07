@@ -308,7 +308,7 @@ UNIVERSE = [
 def test_replenish_fills_pool_and_respects_markets_and_cooldown(tmp_path: Path):
     bars = {symbol: dense_bars(compound_points()) for symbol in ("AAA", "BBB", "CCC")}
     selector, database = build_selector(tmp_path, UNIVERSE, bars)
-    # BBB 近 90 天内被消费过 → 冷却期内不得再进队
+    # BBB 是最近消费的标的 → 短期内不得连续再次进队
     with database.session() as session:
         session.add(
             TopicRecord(
@@ -321,7 +321,7 @@ def test_replenish_fills_pool_and_respects_markets_and_cooldown(tmp_path: Path):
                 angle=ANGLE_COMPOUND,
                 drama_score=0.1,
                 status=TopicStatus.CONSUMED,
-                consumed_at=now_utc() - timedelta(days=30),
+                consumed_at=now_utc() - timedelta(days=1),
             )
         )
 
@@ -382,6 +382,52 @@ def test_replenish_allows_a_new_story_for_a_previously_produced_symbol(tmp_path:
     assert {item["symbol"] for item in report["added"]} == {"AAA", "BBB"}
     bbb = next(item for item in report["added"] if item["symbol"] == "BBB")
     assert bbb["buy_date"] != "2022-01-03"
+
+
+def test_replenish_releases_symbol_after_ten_other_consumed_topics(tmp_path: Path):
+    bars = {"BBB": dense_bars(compound_points())}
+    selector, database = build_selector(tmp_path, UNIVERSE[1:2], bars)
+    consumed_at = now_utc() - timedelta(hours=2)
+    with database.session() as session:
+        session.add(
+            TopicRecord(
+                topic_id="older-bbb",
+                symbol="BBB",
+                name="乙公司",
+                market="CN",
+                buy_date="2022-01-03",
+                amount=1_000_000,
+                angle=ANGLE_COMPOUND,
+                drama_score=0.1,
+                status=TopicStatus.CONSUMED,
+                consumed_at=consumed_at,
+            )
+        )
+        for index in range(10):
+            session.add(
+                TopicRecord(
+                    topic_id=f"newer-{index}",
+                    symbol=f"OTHER-{index}",
+                    name=f"其他公司 {index}",
+                    market="US",
+                    buy_date="2022-01-03",
+                    amount=1_000_000,
+                    angle=ANGLE_COMPOUND,
+                    drama_score=0.1,
+                    status=TopicStatus.CONSUMED,
+                    consumed_at=consumed_at + timedelta(minutes=index + 1),
+                )
+            )
+
+    report = asyncio.run(
+        selector.replenish(
+            PipelinePolicy(pool_target=1, markets=[Market.CN]),
+            as_of=bars["BBB"][-1].date,
+        )
+    )
+
+    assert report["pool_size"] == 1
+    assert [item["symbol"] for item in report["added"]] == ["BBB"]
 
 
 def test_next_topic_rejects_preexisting_queued_duplicate(tmp_path: Path):
@@ -604,7 +650,6 @@ def test_score_bars_accepts_recent_listing_and_uses_listing_start(tmp_path: Path
 # ---------- F3 选题偏好（TopicDirective）----------
 
 from stock_video_generator.topics import (  # noqa: E402
-    TopicDirective,
     directive_weights,
     passes_directive,
 )

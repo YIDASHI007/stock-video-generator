@@ -124,7 +124,8 @@ def passes_directive(
 
 SCORING_LOOKBACK_YEARS = 10
 LONG_HORIZON_LOOKBACK_YEARS = 40
-COOLDOWN_DAYS = 90
+RECENT_SYMBOL_COOLDOWN_COUNT = 10
+RECENT_SYMBOL_COOLDOWN_MAX_DAYS = 7
 DEFAULT_STORY_ANCHOR_YEARS = (5, 8, 10, 15, 20, 25, 30)
 MIN_STORY_HOLD_YEARS = 4.0
 CRYPTO_MIN_STORY_HOLD_YEARS = 0.25
@@ -747,21 +748,35 @@ class TopicSelector:
             forward_return_pct=forward_pct,
         )
 
-    def _cooldown_symbols(self, cooldown_days: int = COOLDOWN_DAYS) -> set[str]:
-        """Temporarily diversify the queue; completed symbols are not banned forever."""
-        threshold = now_utc() - timedelta(days=cooldown_days)
+    def _cooldown_symbols(
+        self,
+        recent_limit: int = RECENT_SYMBOL_COOLDOWN_COUNT,
+        max_days: int = RECENT_SYMBOL_COOLDOWN_MAX_DAYS,
+    ) -> set[str]:
+        """Avoid adjacent repeats without blocking other stories for months.
+
+        Exact story-level deduplication is handled separately by story keys.  This
+        guard only keeps symbols already waiting in the queue plus symbols from the
+        most recent completed/consumed slots (capped to a short time window).
+        """
+        threshold = now_utc() - timedelta(days=max_days)
         with self.database.session() as session:
-            topics = session.scalars(
+            queued = session.scalars(
                 select(TopicRecord).where(
-                    (TopicRecord.status == TopicStatus.QUEUED)
-                    | (
-                        (TopicRecord.status == TopicStatus.CONSUMED)
-                        & (TopicRecord.consumed_at.is_not(None))
-                        & (TopicRecord.consumed_at >= threshold)
-                    )
+                    TopicRecord.status == TopicStatus.QUEUED,
                 )
             ).all()
-            return {topic.symbol for topic in topics}
+            recent = session.scalars(
+                select(TopicRecord)
+                .where(
+                    TopicRecord.status == TopicStatus.CONSUMED,
+                    TopicRecord.consumed_at.is_not(None),
+                    TopicRecord.consumed_at >= threshold,
+                )
+                .order_by(TopicRecord.consumed_at.desc())
+                .limit(recent_limit)
+            ).all()
+            return {topic.symbol for topic in [*queued, *recent]}
 
     @staticmethod
     def _produced_symbols(session) -> set[str]:
@@ -1325,7 +1340,12 @@ class TopicSelector:
                 continue
             if entry.symbol in cooldown:
                 report["skipped"].append(  # type: ignore[union-attr]
-                    {"symbol": entry.symbol, "reason": f"同股冷却 {COOLDOWN_DAYS} 天内"}
+                    {
+                        "symbol": entry.symbol,
+                        "reason": (
+                            f"同股在最近 {RECENT_SYMBOL_COOLDOWN_COUNT} 条作品内出现"
+                        ),
+                    }
                 )
                 continue
             candidates.append(entry)
