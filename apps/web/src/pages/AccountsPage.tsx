@@ -1,4 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from "react";
+import {Link} from "react-router-dom";
+import {CalendarClock, ChevronDown, Clock3, ShieldCheck, SlidersHorizontal} from "lucide-react";
+import {siTiktok, siWechat, siXiaohongshu, type SimpleIcon} from "simple-icons";
 
 import {
   API_BASE,
@@ -15,11 +18,12 @@ import {
   TrashIcon,
 } from "../components";
 import {usePolling} from "../hooks";
+import {accountRuleStore} from "../workspaceStore";
 
 type PlatformMeta = {
   label: string;
-  short: string;
   description: string;
+  icon: SimpleIcon;
 };
 
 const platformOrder: SocialPlatform[] = [
@@ -31,19 +35,39 @@ const platformOrder: SocialPlatform[] = [
 const platformMeta: Record<SocialPlatform, PlatformMeta> = {
   douyin: {
     label: "抖音",
-    short: "抖",
     description: "创作者中心视频与图文账号",
+    icon: siTiktok,
   },
   xiaohongshu: {
     label: "小红书",
-    short: "红",
     description: "专业号与创作服务平台账号",
+    icon: siXiaohongshu,
   },
   wechat_channels: {
     label: "微信视频号",
-    short: "视",
     description: "视频号助手与内容管理账号",
+    icon: siWechat,
   },
+};
+
+const PlatformLogo: React.FC<{platform: SocialPlatform}> = ({platform}) => {
+  const meta = platformMeta[platform];
+  const isDouyin = platform === "douyin";
+  return (
+    <span className={`account-platform-mark ${platform}`} role="img" aria-label={`${meta.label} Logo`}>
+      <svg viewBox={isDouyin ? "-1 -1 26 26" : "0 0 24 24"} focusable="false" aria-hidden="true">
+        {isDouyin ? (
+          <>
+            <path className="tiktok-cyan" transform="translate(-0.45 0.45)" d={meta.icon.path} />
+            <path className="tiktok-red" transform="translate(0.45 -0.45)" d={meta.icon.path} />
+            <path className="tiktok-core" d={meta.icon.path} />
+          </>
+        ) : (
+          <path d={meta.icon.path} />
+        )}
+      </svg>
+    </span>
+  );
 };
 
 const generatedId = (platform: SocialPlatform): string =>
@@ -87,6 +111,12 @@ export const AccountsPage: React.FC = () => {
   const [platform, setPlatform] = useState<SocialPlatform>("douyin");
   const [displayName, setDisplayName] = useState("");
   const [accountId, setAccountId] = useState(generatedId("douyin"));
+  const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
+  const [preferredTime, setPreferredTime] = useState("19:30");
+  const [minIntervalMinutes, setMinIntervalMinutes] = useState(30);
+  const [randomDelayMinutes, setRandomDelayMinutes] = useState(8);
+  const [dailyLimit, setDailyLimit] = useState(5);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loginStates, setLoginStates] = useState<Record<string, PublishLoginStatus>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -144,6 +174,12 @@ export const AccountsPage: React.FC = () => {
     setPlatform(nextPlatform);
     setDisplayName("");
     setAccountId(generatedId(nextPlatform));
+    setAutoPublishEnabled(false);
+    setPreferredTime("19:30");
+    setMinIntervalMinutes(30);
+    setRandomDelayMinutes(8);
+    setDailyLimit(5);
+    setShowAdvanced(false);
     setActionError(null);
     setDialogOpen(true);
   };
@@ -196,8 +232,15 @@ export const AccountsPage: React.FC = () => {
           account_id: accountId.trim(),
           platform,
           display_name: displayName.trim(),
-          auto_publish_enabled: false,
+          auto_publish_enabled: autoPublishEnabled,
         }),
+      });
+      accountRuleStore.upsert({
+        accountId: account.account_id,
+        preferredTime,
+        minIntervalMinutes,
+        randomDelayMinutes,
+        dailyLimit,
       });
       setDialogOpen(false);
       refresh();
@@ -266,6 +309,9 @@ export const AccountsPage: React.FC = () => {
   const connectedCount = accounts.filter(
     (account) => account.enabled && account.auth_status === "logged_in",
   ).length;
+  const accountIdValid = /^[A-Za-z0-9._-]{1,64}$/.test(accountId.trim());
+  const accountIdTaken = accounts.some((account) => account.account_id === accountId.trim());
+  const canCreate = Boolean(displayName.trim()) && accountIdValid && !accountIdTaken;
   const scanState = scanAccount ? loginStates[scanAccount.account_id] : undefined;
   const scanMeta = scanAccount ? platformMeta[scanAccount.platform] : undefined;
   const qrCodeSrc = scanState?.qr_code_url
@@ -305,10 +351,13 @@ export const AccountsPage: React.FC = () => {
           <h1>账号管理</h1>
           <p>集中保存各平台登录会话。后续发布、数据回收和自动化任务都从这里选择账号。</p>
         </div>
-        <button className="button primary" onClick={() => openCreate()}>
-          <PlusIcon size={16} />
-          绑定新账号
-        </button>
+        <div className="module-actions">
+          <Link className="button secondary" to="/publish/calendar"><Clock3 size={15}/> 发布时间槽</Link>
+          <button className="button primary" onClick={() => openCreate()}>
+            <PlusIcon size={16} />
+            绑定新账号
+          </button>
+        </div>
       </header>
 
       {error || actionError ? <ErrorNotice message={actionError ?? error ?? ""} /> : null}
@@ -366,7 +415,7 @@ export const AccountsPage: React.FC = () => {
         <div className="account-empty">
           <div className="account-empty-orbit">
             {platformOrder.map((key) => (
-              <span key={key} className={key}>{platformMeta[key].short}</span>
+              <PlatformLogo key={key} platform={key} />
             ))}
           </div>
           <h2>还没有绑定账号</h2>
@@ -380,63 +429,89 @@ export const AccountsPage: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="account-grid">
+        <div className="account-table" role="table" aria-label="已绑定账号">
+          <div className="account-table-head" role="row">
+            <label className="account-select" title="选择当前列表中的全部账号">
+              <input
+                type="checkbox"
+                aria-label="选择全部账号"
+                checked={visibleAccounts.length > 0 && visibleAccounts.every((account) => selected.has(account.account_id))}
+                onChange={(event) => setSelected((current) => {
+                  const next = new Set(current);
+                  visibleAccounts.forEach((account) => event.target.checked ? next.add(account.account_id) : next.delete(account.account_id));
+                  return next;
+                })}
+              />
+            </label>
+            <span>账号</span>
+            <span>连接状态</span>
+            <span>发布规则</span>
+            <span>最近活动</span>
+            <span>操作</span>
+          </div>
           {visibleAccounts.map((account) => {
             const meta = platformMeta[account.platform];
             const state = accountStatus(account, loginStates[account.account_id]);
             const isBusy = busy.has(account.account_id);
+            const rule = accountRuleStore.get(account.account_id);
             return (
-              <article key={account.account_id} className={`account-card ${account.platform}`}>
-                <div className="account-card-head">
-                  <label className="account-select" title="选择账号">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(account.account_id)}
-                      onChange={(event) =>
-                        setSelected((current) => {
-                          const next = new Set(current);
-                          if (event.target.checked) next.add(account.account_id);
-                          else next.delete(account.account_id);
-                          return next;
-                        })
-                      }
-                    />
-                  </label>
-                  <span className={`account-platform-mark ${account.platform}`}>{meta.short}</span>
+              <article key={account.account_id} className={`account-row ${account.platform}`} role="row">
+                <label className="account-select" title="选择账号">
+                  <input
+                    type="checkbox"
+                    aria-label={`选择${account.display_name}`}
+                    checked={selected.has(account.account_id)}
+                    onChange={(event) =>
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(account.account_id);
+                        else next.delete(account.account_id);
+                        return next;
+                      })
+                    }
+                  />
+                </label>
+                <div className="account-row-identity">
+                  <PlatformLogo platform={account.platform} />
                   <div>
                     <span className="account-platform-name">{meta.label}</span>
                     <h2>{account.display_name}</h2>
+                    <small>{account.account_id}</small>
                   </div>
-                  <span className={`account-status ${state.kind}`}>{state.label}</span>
                 </div>
-                <div className="account-session-line">
-                  <span className={`session-pulse ${state.kind}`} />
-                  <p>{state.detail}</p>
+                <div className="account-row-status">
+                  <span className={`account-status ${state.kind}`}><i className={`session-pulse ${state.kind}`} />{state.label}</span>
+                  <small>{state.detail}</small>
                 </div>
-                <dl className="account-meta">
-                  <div><dt>本机标识</dt><dd>{account.account_id}</dd></div>
-                  <div>
-                    <dt>最近登录</dt>
-                    <dd>{account.last_login_at ? formatFullDateTime(account.last_login_at) : "尚未登录"}</dd>
-                  </div>
-                </dl>
-                <div className="account-card-actions">
+                <div className="account-row-rule">
+                  <span className={account.auto_publish_enabled ? "rule-mode automatic" : "rule-mode"}>
+                    {account.auto_publish_enabled ? <ShieldCheck size={13} /> : <Clock3 size={13} />}
+                    {account.auto_publish_enabled ? "允许自动发布" : "发布前确认"}
+                  </span>
+                  <small>{rule.preferredTime} · 每日 {rule.dailyLimit} 条 · 间隔 {rule.minIntervalMinutes}+0~{rule.randomDelayMinutes} 分钟</small>
+                </div>
+                <div className="account-row-activity">
+                  <strong>{account.last_login_at ? formatFullDateTime(account.last_login_at) : "尚未登录"}</strong>
+                  <small>{account.last_checked_at ? `检测于 ${formatFullDateTime(account.last_checked_at)}` : "尚未检测会话"}</small>
+                </div>
+                <div className="account-row-actions">
                   <button
-                    className="button primary"
+                    className="mini-button account-scan-action"
                     disabled={isBusy}
                     onClick={() => void startLogin(account)}
                   >
                     {isBusy ? "处理中…" : account.enabled ? "重新扫码" : "扫码绑定"}
                   </button>
                   <button
-                    className="button secondary"
+                    className="mini-button"
                     disabled={isBusy || !account.enabled}
                     onClick={() => void checkAccount(account)}
                   >
-                    检测状态
+                    检测
                   </button>
                   <button
                     className="icon-button account-unbind"
+                    aria-label={account.enabled ? `解绑${account.display_name}` : `删除${account.display_name}`}
                     title={account.enabled ? "解绑账号" : "删除账号"}
                     disabled={isBusy}
                     onClick={() => void removeAccount(account)}
@@ -452,11 +527,12 @@ export const AccountsPage: React.FC = () => {
 
       {dialogOpen ? (
         <div className="account-dialog-backdrop" onMouseDown={() => setDialogOpen(false)}>
-          <section className="account-dialog" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="account-dialog account-bind-dialog" role="dialog" aria-modal="true" aria-labelledby="bind-account-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="account-dialog-head">
               <div>
-                <div className="eyebrow">NEW CONNECTION</div>
-                <h2>绑定社交媒体账号</h2>
+                <div className="eyebrow">ACCOUNT CONNECTION · 1 / 2</div>
+                <h2 id="bind-account-title">配置并绑定账号</h2>
+                <p>先设置这个账号的发布权限和默认节奏，下一步直接扫码登录。</p>
               </div>
               <button className="icon-button" onClick={() => setDialogOpen(false)} aria-label="关闭">
                 ×
@@ -469,38 +545,64 @@ export const AccountsPage: React.FC = () => {
                   className={`${key} ${platform === key ? "active" : ""}`}
                   onClick={() => choosePlatform(key)}
                 >
-                  <span className={`account-platform-mark ${key}`}>{platformMeta[key].short}</span>
+                  <PlatformLogo platform={key} />
                   <strong>{platformMeta[key].label}</strong>
                   <small>{platformMeta[key].description}</small>
                 </button>
               ))}
             </div>
             <label className="account-field">
-              <span>账号备注名称</span>
+              <span>账号备注名称 <b>*</b></span>
               <input
                 autoFocus
+                maxLength={120}
                 value={displayName}
                 placeholder={`例如：${platformMeta[platform].label}主账号`}
                 onChange={(event) => setDisplayName(event.target.value)}
               />
+              <small>只在本机工作台中显示，可以使用“平台 + 内容方向”的命名方式。</small>
             </label>
-            <label className="account-field compact">
-              <span>本机账号标识</span>
-              <input value={accountId} onChange={(event) => setAccountId(event.target.value)} />
-              <small>只用于区分本机浏览器会话，创建后不能切换平台。</small>
-            </label>
+            <div className="account-permission-row">
+              <div>
+                <ShieldCheck size={18} />
+                <span><strong>允许自动发布</strong><small>关闭时，所有正式发布仍需在发布台人工确认。</small></span>
+              </div>
+              <label className="switch-control">
+                <input aria-label="允许自动发布" type="checkbox" checked={autoPublishEnabled} onChange={(event) => setAutoPublishEnabled(event.target.checked)} />
+                <span />
+              </label>
+            </div>
+            <div className="account-rule-block">
+              <div className="account-rule-title"><CalendarClock size={16}/><span><strong>默认发布节奏</strong><small>创建后仍可在发布日历中单独调整。</small></span></div>
+              <div className="account-rule-grid">
+                <label className="account-field"><span>首选时段</span><input type="time" value={preferredTime} onChange={(event) => setPreferredTime(event.target.value)} /></label>
+                <label className="account-field"><span>每日上限</span><input type="number" min={1} max={100} value={dailyLimit} onChange={(event) => setDailyLimit(Math.max(1, Number(event.target.value) || 1))} /></label>
+                <label className="account-field"><span>最小间隔（分钟）</span><input type="number" min={0} max={1440} value={minIntervalMinutes} onChange={(event) => setMinIntervalMinutes(Math.max(0, Number(event.target.value) || 0))} /></label>
+                <label className="account-field"><span>随机延迟（分钟）</span><input type="number" min={0} max={240} value={randomDelayMinutes} onChange={(event) => setRandomDelayMinutes(Math.max(0, Number(event.target.value) || 0))} /></label>
+              </div>
+            </div>
+            <button type="button" className="account-advanced-toggle" onClick={() => setShowAdvanced((current) => !current)} aria-expanded={showAdvanced}>
+              <SlidersHorizontal size={15}/><span>高级设置</span><ChevronDown size={15} className={showAdvanced ? "open" : ""}/>
+            </button>
+            {showAdvanced ? (
+              <label className={`account-field compact ${!accountIdValid || accountIdTaken ? "invalid" : ""}`}>
+                <span>本机账号标识 <b>*</b></span>
+                <input value={accountId} maxLength={64} onChange={(event) => setAccountId(event.target.value)} />
+                <small>{accountIdTaken ? "这个本机标识已存在，请更换一个。" : accountIdValid ? "仅支持字母、数字、点、下划线和短横线。" : "格式不正确，仅支持字母、数字、点、下划线和短横线。"}</small>
+              </label>
+            ) : null}
             <div className="account-login-note">
-              <span className={`account-platform-mark ${platform}`}>{platformMeta[platform].short}</span>
+              <PlatformLogo platform={platform} />
               <p>继续后会在当前页面显示{platformMeta[platform].label}官方二维码。登录资料不会上传到服务器。</p>
             </div>
             <div className="account-dialog-actions">
               <button className="button secondary" onClick={() => setDialogOpen(false)}>取消</button>
               <button
                 className="button primary"
-                disabled={!displayName.trim() || !accountId.trim() || busy.has(`create:${accountId}`)}
+                disabled={!canCreate || busy.has(`create:${accountId}`)}
                 onClick={() => void createAccount()}
               >
-                保存并获取二维码
+                {busy.has(`create:${accountId}`) ? "正在创建…" : "下一步：扫码登录"}
               </button>
             </div>
           </section>
@@ -511,12 +613,15 @@ export const AccountsPage: React.FC = () => {
         <div className="account-dialog-backdrop" onMouseDown={() => void closeScanDialog()}>
           <section
             className={`account-dialog account-qr-dialog ${scanAccount.platform}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scan-account-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="account-dialog-head">
               <div>
-                <div className="eyebrow">SECURE SIGN IN</div>
-                <h2>扫码绑定{scanMeta.label}</h2>
+                <div className="eyebrow">ACCOUNT CONNECTION · 2 / 2</div>
+                <h2 id="scan-account-title">扫码绑定{scanMeta.label}</h2>
               </div>
               <button
                 className="icon-button"
@@ -527,9 +632,7 @@ export const AccountsPage: React.FC = () => {
               </button>
             </div>
             <div className="account-qr-identity">
-              <span className={`account-platform-mark ${scanAccount.platform}`}>
-                {scanMeta.short}
-              </span>
+              <PlatformLogo platform={scanAccount.platform} />
               <div>
                 <strong>{scanAccount.display_name}</strong>
                 <small>{scanAccount.account_id}</small>

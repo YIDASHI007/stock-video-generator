@@ -1,5 +1,40 @@
-import React, {useCallback} from "react";
-import {Link, NavLink, Outlet} from "react-router-dom";
+import React, {useCallback, useEffect, useMemo, useState} from "react";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  Boxes,
+  CalendarDays,
+  ChevronRight,
+  CircleUserRound,
+  Clapperboard,
+  Database,
+  FileClock,
+  FileVideo2,
+  Gauge,
+  GitBranch,
+  HardDrive,
+  History,
+  LayoutDashboard,
+  ListChecks,
+  Logs,
+  Menu,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PlaySquare,
+  Rocket,
+  Search,
+  Settings2,
+  Moon,
+  Sun,
+  Sparkles,
+  UploadCloud,
+  UsersRound,
+  Workflow,
+  X,
+} from "lucide-react";
+import {Link, NavLink, Outlet, useLocation} from "react-router-dom";
 
 import {api, type Job} from "./api";
 import {usePolling} from "./hooks";
@@ -306,49 +341,262 @@ const SidebarHealth: React.FC = () => {
   );
 };
 
-export const Layout: React.FC = () => (
-  <div className="app-shell">
-    <aside className="sidebar">
-      <Link to="/" className="brand">
-        <span className="brand-mark">↗</span>
-        <span className="brand-text">
-          <strong>回测影像</strong>
-          <small>STOCK TIMELINE</small>
-        </span>
-      </Link>
-      <nav className="sidebar-nav">
-        <NavLink to="/" end>
-          <DashboardIcon size={17} />
-          <span>驾驶舱</span>
-        </NavLink>
-        <NavLink to="/workbench">
-          <WorkbenchIcon size={17} />
-          <span>工作台</span>
-        </NavLink>
-        <NavLink to="/jobs">
-          <JobsIcon size={17} />
-          <span>任务中心</span>
-        </NavLink>
-        <NavLink to="/publish">
-          <PublishIcon size={17} />
-          <span>发布中心</span>
-        </NavLink>
-        <NavLink to="/accounts">
-          <AccountsIcon size={17} />
-          <span>账号管理</span>
-        </NavLink>
-        <NavLink to="/settings">
-          <SettingsIcon size={17} />
-          <span>设置</span>
-        </NavLink>
-      </nav>
-      <SidebarHealth />
-    </aside>
-    <main className="main-content">
-      <Outlet />
-    </main>
-  </div>
+type NavItem = {
+  to: string;
+  label: string;
+  description?: string;
+  icon: React.ComponentType<{size?: number; strokeWidth?: number}>;
+  end?: boolean;
+};
+
+type NavGroup = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  icon: React.ComponentType<{size?: number; strokeWidth?: number}>;
+  match: (pathname: string) => boolean;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    key: "overview",
+    label: "总览",
+    shortLabel: "总览",
+    icon: LayoutDashboard,
+    match: (path) => path === "/",
+    items: [
+      {to: "/", label: "运营总览", description: "系统指标与待办", icon: Gauge, end: true},
+    ],
+  },
+  {
+    key: "production",
+    label: "内容生产",
+    shortLabel: "生产",
+    icon: Workflow,
+    match: (path) => ["/workflows", "/workbench", "/jobs", "/create"].some((item) => path.startsWith(item)),
+    items: [
+      {to: "/workflows", label: "工作流", description: "模板、复制与配置", icon: GitBranch},
+      {to: "/workbench", label: "生产控制台", description: "自动选题与运行策略", icon: Sparkles},
+      {to: "/jobs", label: "运行中心", description: "队列、进度与异常", icon: Activity},
+      {to: "/create", label: "手动创建", description: "单次内容生产", icon: PlaySquare},
+    ],
+  },
+  {
+    key: "assets",
+    label: "内容资产",
+    shortLabel: "资产",
+    icon: Boxes,
+    match: (path) => path.startsWith("/assets") || path.startsWith("/simulations"),
+    items: [
+      {to: "/assets", label: "内容库", description: "成片与内容元数据", icon: FileVideo2},
+      {to: "/assets/materials", label: "素材库", description: "封面、音乐与源文件", icon: HardDrive},
+    ],
+  },
+  {
+    key: "publishing",
+    label: "内容发布",
+    shortLabel: "发布",
+    icon: UploadCloud,
+    match: (path) => path.startsWith("/publish"),
+    items: [
+      {to: "/publish", label: "发布台", description: "审核内容并选择账号", icon: Rocket, end: true},
+      {to: "/publish/calendar", label: "发布日历", description: "排期与账号时间槽", icon: CalendarDays},
+      {to: "/publish/records", label: "发布记录", description: "结果、证据与重试", icon: History},
+    ],
+  },
+  {
+    key: "accounts",
+    label: "账号管理",
+    shortLabel: "账号",
+    icon: UsersRound,
+    match: (path) => path.startsWith("/accounts"),
+    items: [
+      {to: "/accounts", label: "账号池", description: "登录状态与发布规则", icon: CircleUserRound},
+    ],
+  },
+  {
+    key: "analytics",
+    label: "数据分析",
+    shortLabel: "分析",
+    icon: BarChart3,
+    match: (path) => path.startsWith("/analytics"),
+    items: [
+      {to: "/analytics", label: "运营分析", description: "产能、成功率与分布", icon: BarChart3},
+    ],
+  },
+  {
+    key: "system",
+    label: "系统管理",
+    shortLabel: "系统",
+    icon: Settings2,
+    match: (path) => path.startsWith("/settings") || path.startsWith("/system"),
+    items: [
+      {to: "/settings", label: "系统设置", description: "数据源与生产参数", icon: Settings2},
+      {to: "/system/logs", label: "运行日志", description: "诊断与错误信息", icon: Logs},
+      {to: "/system/backups", label: "备份与更新", description: "数据库与版本状态", icon: Database},
+    ],
+  },
+];
+
+const searchItems = navGroups.flatMap((group) =>
+  group.items.map((item) => ({...item, group: group.label})),
 );
+
+const GlobalSearch: React.FC<{open: boolean; onClose: () => void}> = ({open, onClose}) => {
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+  if (!open) return null;
+  const filtered = searchItems.filter((item) =>
+    `${item.group}${item.label}${item.description ?? ""}`.toLowerCase().includes(query.toLowerCase()),
+  );
+  return (
+    <div className="command-backdrop" onMouseDown={onClose}>
+      <section className="command-panel" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="command-input">
+          <Search size={18} />
+          <input aria-label="全局搜索" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索功能、页面或设置…" />
+          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭搜索"><X size={17} /></button>
+        </div>
+        <div className="command-results">
+          {filtered.map((item) => (
+            <Link key={item.to} to={item.to} onClick={onClose}>
+              <item.icon size={17} />
+              <span><strong>{item.label}</strong><small>{item.group} · {item.description}</small></span>
+              <ChevronRight size={15} />
+            </Link>
+          ))}
+          {filtered.length === 0 ? <p className="command-empty">没有找到相关功能</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+export const Layout: React.FC = () => {
+  const {pathname} = useLocation();
+  const activeGroup = useMemo(
+    () => navGroups.find((group) => group.match(pathname)) ?? navGroups[0],
+    [pathname],
+  );
+  const [contextOpen, setContextOpen] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const current = document.documentElement.dataset.theme;
+    return current === "light" ? "light" : "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem("content-ops.theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+      if (event.key === "Escape") setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => setMobileMoreOpen(false), [pathname]);
+
+  return (
+    <div className={`app-shell ${contextOpen ? "context-open" : "context-closed"}`}>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
+      <aside className="app-rail" aria-label="主导航">
+        <Link to="/" className="rail-brand" title="内容自动化工作台"><span>↗</span></Link>
+        <nav className="rail-nav">
+          {navGroups.map((group, index) => (
+            <Link key={group.key} to={group.items[0].to} className={`${activeGroup.key === group.key ? "active" : ""} ${index >= 5 ? "mobile-overflow-only" : ""}`} title={group.label}>
+              <group.icon size={20} strokeWidth={1.7} />
+              <small>{group.shortLabel}</small>
+            </Link>
+          ))}
+          <button
+            type="button"
+            className={`mobile-more-toggle ${["analytics", "system"].includes(activeGroup.key) || mobileMoreOpen ? "active" : ""}`}
+            onClick={() => setMobileMoreOpen((current) => !current)}
+            aria-label={mobileMoreOpen ? "关闭更多导航" : "打开更多导航"}
+            aria-expanded={mobileMoreOpen}
+          >
+            <MoreHorizontal size={20} strokeWidth={1.7}/><small>更多</small>
+          </button>
+        </nav>
+        <SidebarHealth />
+      </aside>
+
+      {mobileMoreOpen ? (
+        <div className="mobile-nav-scrim" onMouseDown={() => setMobileMoreOpen(false)}>
+          <nav className="mobile-nav-overflow" aria-label="更多功能" onMouseDown={(event) => event.stopPropagation()}>
+            <header><strong>更多功能</strong><button type="button" onClick={() => setMobileMoreOpen(false)} aria-label="关闭更多导航"><X size={18}/></button></header>
+            {navGroups.slice(5).map((group) => (
+              <section key={group.key}>
+                <span><group.icon size={16}/>{group.label}</span>
+                {group.items.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end}><item.icon size={17}/><span><strong>{item.label}</strong><small>{item.description}</small></span><ChevronRight size={15}/></NavLink>
+                ))}
+              </section>
+            ))}
+          </nav>
+        </div>
+      ) : null}
+
+      <aside className="context-nav">
+        <div className="context-head">
+          <Link to="/" className="context-brand"><strong>内容工作台</strong><small>CONTENT OPERATIONS</small></Link>
+          <button type="button" className="context-collapse" onClick={() => setContextOpen(false)} aria-label="收起导航"><PanelLeftClose size={17} /></button>
+        </div>
+        <div className="context-title"><activeGroup.icon size={17} /><span>{activeGroup.label}</span></div>
+        <nav className="context-links">
+          {activeGroup.items.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end}>
+              <item.icon size={17} />
+              <span><strong>{item.label}</strong><small>{item.description}</small></span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="context-foot">
+          <span><FileClock size={15} /> 本地数据持续保存</span>
+          <small>单机运行 · 无需云端账户</small>
+        </div>
+      </aside>
+
+      <div className="workspace-frame">
+        <header className="workspace-topbar">
+          <div className="workspace-breadcrumb">
+            {!contextOpen ? <button type="button" className="icon-button" onClick={() => setContextOpen(true)} aria-label="展开导航"><PanelLeftOpen size={18} /></button> : null}
+            <span>{activeGroup.label}</span><ChevronRight size={14} /><strong>{activeGroup.items.find((item) => pathname === item.to || (!item.end && pathname.startsWith(item.to)))?.label ?? activeGroup.items[0].label}</strong>
+          </div>
+          <div className="workspace-tools">
+            <button type="button" className="topbar-search" onClick={() => setSearchOpen(true)} aria-label="搜索"><Search size={15} /><span>搜索</span><kbd>Ctrl K</kbd></button>
+            <button
+              type="button"
+              className="topbar-icon theme-toggle"
+              onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+              aria-label={theme === "dark" ? "切换到日间模式" : "切换到夜间模式"}
+              title={theme === "dark" ? "日间模式" : "夜间模式"}
+            >
+              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <Link to="/jobs?filter=attention" className="topbar-icon" title="异常与待办"><Bell size={17} /></Link>
+            <Link to="/accounts" className="topbar-avatar" title="本地使用者">本</Link>
+          </div>
+        </header>
+        <main id="main-content" className="main-content" tabIndex={-1}><Outlet /></main>
+      </div>
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+    </div>
+  );
+};
 
 /* ---------------- 通用件 ---------------- */
 

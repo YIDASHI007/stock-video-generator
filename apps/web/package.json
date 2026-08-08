@@ -1,6 +1,6 @@
 {
   "name": "@stock-video/web",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,10 +13,12 @@
     "@remotion/player": "4.0.499",
     "@stock-video/schemas": "workspace:*",
     "@stock-video/video-template": "workspace:*",
+    "lucide-react": "^0.468.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.13.1",
-    "remotion": "4.0.499"
+    "remotion": "4.0.499",
+    "simple-icons": "16.21.0"
   },
   "devDependencies": {
     "@types/react": "19.2.14",

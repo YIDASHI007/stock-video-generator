@@ -270,6 +270,7 @@ export const OutputGallery: React.FC<{outputs: GalleryOutput[]}> = ({
   const [batchAccountId, setBatchAccountId] = useState("");
   const [batchName, setBatchName] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(10);
+  const [randomDelayMinutes, setRandomDelayMinutes] = useState(0);
   const [failurePolicy, setFailurePolicy] = useState<"pause" | "skip">("pause");
   const [startAt, setStartAt] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
@@ -388,6 +389,7 @@ export const OutputGallery: React.FC<{outputs: GalleryOutput[]}> = ({
           account_id: batchAccountId,
           name: batchName.trim() || null,
           interval_minutes: intervalMinutes,
+          random_delay_minutes: randomDelayMinutes,
           start_at: startAt ? new Date(startAt).toISOString() : null,
           failure_policy: failurePolicy,
         }),
@@ -571,8 +573,8 @@ export const OutputGallery: React.FC<{outputs: GalleryOutput[]}> = ({
             <div className="batch-summary">
               <strong>{selectedOutputs.length} 条视频</strong>
               <span>
-                最低等待约 {(Math.max(0, selectedOutputs.length - 1) * intervalMinutes)} 分钟
-                （不含上传耗时）
+                最低等待约 {(Math.max(0, selectedOutputs.length - 1) * intervalMinutes)} 分钟；
+                每条额外随机 0~{randomDelayMinutes} 分钟（不含上传耗时）
               </span>
             </div>
             <div className="batch-form-grid">
@@ -603,6 +605,16 @@ export const OutputGallery: React.FC<{outputs: GalleryOutput[]}> = ({
                       Math.min(1440, Math.max(5, Number(event.target.value) || 5)),
                     )
                   }
+                />
+              </label>
+              <label>
+                随机延迟上限（分钟）
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={randomDelayMinutes}
+                  onChange={(event) => setRandomDelayMinutes(Math.min(240, Math.max(0, Number(event.target.value) || 0)))}
                 />
               </label>
               <label>

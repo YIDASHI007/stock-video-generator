@@ -237,6 +237,7 @@ export type PublishBatch = {
   account_id: string;
   status: string;
   interval_minutes: number;
+  random_delay_minutes: number;
   failure_policy: "pause" | "skip";
   start_at: string | null;
   next_run_at: string | null;

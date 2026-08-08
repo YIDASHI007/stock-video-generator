@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ class PublishBatchCreate(BaseModel):
     account_id: str
     name: str | None = Field(default=None, max_length=160)
     interval_minutes: int = Field(default=10, ge=5, le=1440)
+    random_delay_minutes: int = Field(default=0, ge=0, le=240)
     start_at: datetime | None = None
     failure_policy: Literal["pause", "skip"] = "pause"
 
@@ -56,6 +58,7 @@ class PublishBatchCreate(BaseModel):
 
 class PublishBatchUpdate(BaseModel):
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+    random_delay_minutes: int | None = Field(default=None, ge=0, le=240)
     failure_policy: Literal["pause", "skip"] | None = None
 
 
@@ -183,6 +186,7 @@ class PublishBatchService:
                     account_id=request.account_id,
                     status=PublishBatchStatus.READY,
                     interval_seconds=request.interval_minutes * 60,
+                    random_delay_seconds=request.random_delay_minutes * 60,
                     failure_policy=request.failure_policy,
                     start_at=request.start_at,
                 )
@@ -275,6 +279,7 @@ class PublishBatchService:
                 "account_id": batch.account_id,
                 "status": batch.status,
                 "interval_minutes": batch.interval_seconds // 60,
+                "random_delay_minutes": batch.random_delay_seconds // 60,
                 "failure_policy": batch.failure_policy,
                 "start_at": batch.start_at,
                 "next_run_at": batch.next_run_at,
@@ -370,6 +375,8 @@ class PublishBatchService:
                 raise KeyError("batch")
             if request.interval_minutes is not None:
                 batch.interval_seconds = request.interval_minutes * 60
+            if request.random_delay_minutes is not None:
+                batch.random_delay_seconds = request.random_delay_minutes * 60
             if request.failure_policy is not None:
                 batch.failure_policy = request.failure_policy
         return self.payload(batch_id)
@@ -437,6 +444,11 @@ class PublishBatchManager:
                 pass
             await asyncio.sleep(1)
 
+    @staticmethod
+    def _next_delay_seconds(batch: PublishBatchRecord) -> int:
+        jitter = max(0, batch.random_delay_seconds)
+        return batch.interval_seconds + (secrets.randbelow(jitter + 1) if jitter else 0)
+
     def tick(self) -> None:
         with self.database.session() as session:
             batch_ids = list(
@@ -502,7 +514,7 @@ class PublishBatchManager:
                     elif remaining:
                         batch.status = PublishBatchStatus.WAITING_INTERVAL
                         batch.next_run_at = now + timedelta(
-                            seconds=batch.interval_seconds
+                            seconds=self._next_delay_seconds(batch)
                         )
                     else:
                         failed = any(
@@ -548,7 +560,7 @@ class PublishBatchManager:
                         if remaining:
                             batch.status = PublishBatchStatus.WAITING_INTERVAL
                             batch.next_run_at = now + timedelta(
-                                seconds=batch.interval_seconds
+                                seconds=self._next_delay_seconds(batch)
                             )
                         else:
                             batch.status = PublishBatchStatus.PARTIAL_FAILED
