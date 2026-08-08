@@ -262,6 +262,15 @@ export const PublishIcon: React.FC<IconProps> = (props) => (
   </Svg>
 );
 
+export const AccountsIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <circle cx="9" cy="8" r="3" />
+    <path d="M3.8 19c.4-3.4 2.1-5.2 5.2-5.2s4.8 1.8 5.2 5.2" />
+    <circle cx="17.2" cy="9.2" r="2.2" />
+    <path d="M15.3 14.4c3.2-.4 5 .9 5.4 3.9" />
+  </Svg>
+);
+
 export const WorkbenchIcon: React.FC<IconProps> = (props) => (
   <Svg {...props}>
     <path d="M4 7h16M4 12h16M4 17h16" />
@@ -323,6 +332,10 @@ export const Layout: React.FC = () => (
         <NavLink to="/publish">
           <PublishIcon size={17} />
           <span>发布中心</span>
+        </NavLink>
+        <NavLink to="/accounts">
+          <AccountsIcon size={17} />
+          <span>账号管理</span>
         </NavLink>
         <NavLink to="/settings">
           <SettingsIcon size={17} />

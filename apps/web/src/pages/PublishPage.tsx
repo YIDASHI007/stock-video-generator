@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useState} from "react";
 
 import {
+  API_BASE,
   api,
   coverUrl,
   publishEvidenceUrl,
@@ -253,7 +254,7 @@ export const PublishPage: React.FC = () => {
             <span className="publish-safe">本地会话档案</span>
           </div>
           <p className="publish-step-help">
-            首次使用不需要先选账号：确认下面两个名称后，直接点击“保存并打开扫码登录”。
+            首次使用不需要先选账号：确认下面两个名称后，直接获取官方登录二维码。
           </p>
           <div className="publish-form-grid">
             <label>
@@ -300,7 +301,7 @@ export const PublishPage: React.FC = () => {
               disabled={busy || !accountId.trim() || !displayName.trim()}
               onClick={openLogin}
             >
-              保存并打开扫码登录
+              保存并获取登录二维码
             </button>
             <button
               className="button"
@@ -316,9 +317,16 @@ export const PublishPage: React.FC = () => {
             </p>
           ) : null}
           {loginState ? (
-            <p className={`publish-login-state ${loginState.status}`}>
-              {loginState.message}
-            </p>
+            <div className={`publish-login-state ${loginState.status}`}>
+              {loginState.qr_code_url && loginState.status !== "logged_in" ? (
+                <img
+                  className="publish-login-qr"
+                  src={`${API_BASE}${loginState.qr_code_url}?v=${loginState.qr_revision ?? 0}`}
+                  alt="抖音登录二维码"
+                />
+              ) : null}
+              <p>{loginState.message}</p>
+            </div>
           ) : null}
         </div>
 

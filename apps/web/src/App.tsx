@@ -3,6 +3,7 @@ import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
 
 import {Layout} from "./components";
 import {CreatePage} from "./pages/CreatePage";
+import {AccountsPage} from "./pages/AccountsPage";
 import {DashboardPage} from "./pages/DashboardPage";
 import {JobsPage} from "./pages/JobsPage";
 import {PreviewPage} from "./pages/PreviewPage";
@@ -20,6 +21,7 @@ export const App: React.FC = () => (
         <Route path="create" element={<CreatePage />} />
         <Route path="jobs" element={<JobsPage />} />
         <Route path="publish" element={<PublishPage />} />
+        <Route path="accounts" element={<AccountsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="simulations/:simulationId" element={<SimulationPage />} />
         <Route

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from stock_video_generator.config import Settings
@@ -205,10 +205,12 @@ class PublishAccountRecord(Base):
     __tablename__ = "publish_accounts"
 
     account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(24), default="douyin", index=True)
     display_name: Mapped[str] = mapped_column(String(120))
     browser_profile_dir: Mapped[str] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auth_status: Mapped[str] = mapped_column(String(24), default="unknown", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -216,6 +218,10 @@ class PublishAccountRecord(Base):
         onupdate=now_utc,
     )
     last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -520,6 +526,34 @@ class Database:
 
     def initialize(self) -> None:
         Base.metadata.create_all(self.engine)
+        self._upgrade_publish_accounts()
+
+    def _upgrade_publish_accounts(self) -> None:
+        """Keep pre-v0.1.4 account databases readable without a destructive migration."""
+
+        inspector = inspect(self.engine)
+        if "publish_accounts" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("publish_accounts")}
+        additions = {
+            "platform": "VARCHAR(24) NOT NULL DEFAULT 'douyin'",
+            "auth_status": "VARCHAR(24) NOT NULL DEFAULT 'unknown'",
+            "last_checked_at": "DATETIME NULL",
+        }
+        with self.engine.begin() as connection:
+            for name, definition in additions.items():
+                if name not in columns:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE publish_accounts ADD COLUMN {name} {definition}"
+                    )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_publish_accounts_platform "
+                "ON publish_accounts (platform)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_publish_accounts_auth_status "
+                "ON publish_accounts (auth_status)"
+            )
 
     @contextmanager
     def session(self) -> Iterator[Session]:

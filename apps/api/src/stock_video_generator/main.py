@@ -69,6 +69,7 @@ from stock_video_generator.publishing import (
     PublishingService,
     PublishJobCreate,
     PublishJobUpdate,
+    SocialPlatform,
     load_output_copy,
     output_copy_path,
     publish_account_payload,
@@ -968,17 +969,109 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
 
     # ---------- 自动生产总控 ----------
 
-    # ---------- 抖音发布中心 ----------
+    # ---------- 社交账号与发布中心 ----------
+
+    @app.get("/api/accounts")
+    async def list_social_accounts(
+        platform: SocialPlatform | None = None,
+    ) -> list[dict[str, object]]:
+        return [
+            publish_account_payload(item)
+            for item in publishing.list_accounts(platform=platform)
+        ]
+
+    @app.post("/api/accounts", status_code=status.HTTP_201_CREATED)
+    async def create_social_account(request: PublishAccountCreate) -> dict[str, object]:
+        try:
+            return publish_account_payload(publishing.save_account(request))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/accounts/{account_id}/login")
+    async def get_social_account_login(account_id: str) -> dict[str, object]:
+        try:
+            return publish_manager.login_status(account_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+
+    @app.post(
+        "/api/accounts/{account_id}/login",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def login_social_account(account_id: str) -> dict[str, object]:
+        try:
+            return publish_manager.start_login(account_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/accounts/{account_id}/login/qr")
+    async def get_social_account_login_qr(account_id: str) -> FileResponse:
+        try:
+            path = publish_manager.login_qr_path(account_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return FileResponse(
+            path,
+            media_type="image/png",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    @app.post("/api/accounts/{account_id}/login/cancel")
+    async def cancel_social_account_login(account_id: str) -> dict[str, object]:
+        try:
+            return publish_manager.cancel_login(account_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+
+    @app.post("/api/accounts/{account_id}/check")
+    async def check_social_account(account_id: str) -> dict[str, object]:
+        try:
+            return await publish_manager.check_account(account_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/accounts/{account_id}/unbind")
+    async def unbind_social_account(account_id: str) -> dict[str, object]:
+        try:
+            return publish_account_payload(publish_manager.unbind_account(account_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/api/accounts/{account_id}")
+    async def delete_social_account(account_id: str) -> dict[str, object]:
+        try:
+            publish_manager.delete_account(account_id)
+            return {"deleted": True, "account_id": account_id}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="未找到社交账号") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/publish/accounts")
     async def list_publish_accounts() -> list[dict[str, object]]:
-        return [publish_account_payload(item) for item in publishing.list_accounts()]
+        return [
+            publish_account_payload(item)
+            for item in publishing.list_accounts(platform="douyin")
+        ]
 
     @app.post("/api/publish/accounts", status_code=status.HTTP_201_CREATED)
     async def create_publish_account(
         request: PublishAccountCreate,
     ) -> dict[str, object]:
-        return publish_account_payload(publishing.save_account(request))
+        if request.platform != "douyin":
+            raise HTTPException(status_code=409, detail="发布中心当前只接受抖音账号")
+        try:
+            return publish_account_payload(publishing.save_account(request))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/publish/accounts/{account_id}/login")
     async def get_publish_account_login(account_id: str) -> dict[str, object]:
