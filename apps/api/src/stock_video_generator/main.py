@@ -33,6 +33,7 @@ from stock_video_generator.config import Settings
 from stock_video_generator.config import settings as default_settings
 from stock_video_generator.database import (
     Database,
+    JobRecord,
     JobStage,
     OutputRecord,
     PipelineRunRecord,
@@ -322,6 +323,95 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     async def provider_health() -> list[dict[str, object]]:
         results = await market_data.health()
         return [result.model_dump(mode="json") for result in results]
+
+    @app.get("/api/system/status")
+    async def system_status() -> dict[str, object]:
+        """Return local runtime and storage facts for the operations workspace."""
+
+        database_path = (settings.data_dir / "database" / "stock_video.db").resolve()
+        outputs_dir = (settings.data_dir / "outputs").resolve()
+        disk = shutil.disk_usage(settings.data_dir)
+        output_bytes = sum(
+            path.stat().st_size
+            for path in outputs_dir.rglob("*")
+            if path.is_file()
+        )
+        with database.session() as session:
+            output_count = len(session.scalars(select(OutputRecord.output_id)).all())
+            job_count = len(session.scalars(select(JobRecord.job_id)).all())
+            publish_count = len(session.scalars(select(PublishJobRecord.publish_id)).all())
+        return {
+            "version": __version__,
+            "data_dir": str(settings.data_dir.resolve()),
+            "log_dir": str(settings.log_dir.resolve()),
+            "database_path": str(database_path),
+            "database_size_bytes": database_path.stat().st_size if database_path.exists() else 0,
+            "outputs_size_bytes": output_bytes,
+            "output_count": output_count,
+            "job_count": job_count,
+            "publish_count": publish_count,
+            "disk_free_bytes": disk.free,
+            "disk_total_bytes": disk.total,
+        }
+
+    @app.get("/api/system/logs")
+    async def system_logs(
+        kind: str = Query(default="app", pattern="^(app|error)$"),
+        limit: int = Query(default=200, ge=20, le=2000),
+    ) -> dict[str, object]:
+        path = settings.log_dir / f"{kind}.log"
+        if not path.exists():
+            return {"kind": kind, "path": str(path.resolve()), "lines": []}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+        redacted = [
+            re.sub(
+                r"(?i)(authorization|cookie|api[_-]?key|token)(\s*[:=]\s*)[^\s,;]+",
+                r"\1\2[REDACTED]",
+                line,
+            )
+            for line in lines
+        ]
+        return {"kind": kind, "path": str(path.resolve()), "lines": redacted}
+
+    @app.get("/api/system/backups")
+    async def system_backups() -> list[dict[str, object]]:
+        backup_dir = settings.data_dir / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return [
+            {
+                "name": path.name,
+                "path": str(path.resolve()),
+                "size_bytes": path.stat().st_size,
+                "created_at": datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+            }
+            for path in sorted(
+                backup_dir.glob("*.zip"),
+                key=lambda item: item.stat().st_mtime,
+                reverse=True,
+            )
+        ]
+
+    @app.post("/api/system/backups", status_code=status.HTTP_201_CREATED)
+    async def create_system_backup() -> dict[str, object]:
+        """Create a compact backup of the database and key configuration only."""
+
+        backup_dir = settings.data_dir / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+        target = backup_dir / f"stock-video-backup-{stamp}.zip"
+        database_path = settings.data_dir / "database" / "stock_video.db"
+        policy_path = settings.data_dir / "pipeline_policy.json"
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            if database_path.exists():
+                archive.write(database_path, "database/stock_video.db")
+            if policy_path.exists():
+                archive.write(policy_path, "pipeline_policy.json")
+        return {
+            "name": target.name,
+            "path": str(target.resolve()),
+            "size_bytes": target.stat().st_size,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
 
     @app.get("/api/instruments/search")
     async def search_instruments(

@@ -38,6 +38,7 @@ export const PublishBatchPanel: React.FC = () => {
   );
   const [selectedId, setSelectedId] = useState("");
   const [interval, setInterval] = useState(10);
+  const [randomDelay, setRandomDelay] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +49,7 @@ export const PublishBatchPanel: React.FC = () => {
     if (target && selectedId !== target.batch_id) {
       setSelectedId(target.batch_id);
       setInterval(target.interval_minutes);
+      setRandomDelay(target.random_delay_minutes ?? 0);
     }
   }, [batches, requestedId, selectedId]);
 
@@ -72,6 +74,7 @@ export const PublishBatchPanel: React.FC = () => {
   const selectBatch = (batch: PublishBatch) => {
     setSelectedId(batch.batch_id);
     setInterval(batch.interval_minutes);
+    setRandomDelay(batch.random_delay_minutes ?? 0);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set("batch", batch.batch_id);
@@ -133,7 +136,7 @@ export const PublishBatchPanel: React.FC = () => {
                 </strong>
               </span>
               <span>
-                固定间隔<strong>{selected.interval_minutes} 分钟</strong>
+                发布间隔<strong>{selected.interval_minutes} + 0~{selected.random_delay_minutes ?? 0} 分钟</strong>
               </span>
             </div>
             <ProgressBar value={progress} />
@@ -160,19 +163,29 @@ export const PublishBatchPanel: React.FC = () => {
                   }
                 />
               </label>
+              <label>
+                随机延迟（0~分钟）
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={randomDelay}
+                  onChange={(event) => setRandomDelay(Math.min(240, Math.max(0, Number(event.target.value) || 0)))}
+                />
+              </label>
               <button
                 className="button"
-                disabled={busy || interval === selected.interval_minutes}
+                disabled={busy || (interval === selected.interval_minutes && randomDelay === (selected.random_delay_minutes ?? 0))}
                 onClick={() =>
                   void run(() =>
                     api(`/api/publish/batches/${selected.batch_id}`, {
                       method: "PATCH",
-                      body: JSON.stringify({interval_minutes: interval}),
+                      body: JSON.stringify({interval_minutes: interval, random_delay_minutes: randomDelay}),
                     }),
                   )
                 }
               >
-                保存后续间隔
+                保存间隔规则
               </button>
               {selected.status === "READY" ? (
                 <button

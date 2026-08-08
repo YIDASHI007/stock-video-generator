@@ -281,6 +281,7 @@ class PublishBatchRecord(Base):
         index=True,
     )
     interval_seconds: Mapped[int] = mapped_column(Integer, default=600)
+    random_delay_seconds: Mapped[int] = mapped_column(Integer, default=0)
     failure_policy: Mapped[str] = mapped_column(String(16), default="pause")
     start_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -527,6 +528,7 @@ class Database:
     def initialize(self) -> None:
         Base.metadata.create_all(self.engine)
         self._upgrade_publish_accounts()
+        self._upgrade_publish_batches()
 
     def _upgrade_publish_accounts(self) -> None:
         """Keep pre-v0.1.4 account databases readable without a destructive migration."""
@@ -554,6 +556,20 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS ix_publish_accounts_auth_status "
                 "ON publish_accounts (auth_status)"
             )
+
+    def _upgrade_publish_batches(self) -> None:
+        """Add optional randomized spacing without rebuilding existing batch tables."""
+
+        inspector = inspect(self.engine)
+        if "publish_batches" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("publish_batches")}
+        if "random_delay_seconds" not in columns:
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "ALTER TABLE publish_batches ADD COLUMN "
+                    "random_delay_seconds INTEGER NOT NULL DEFAULT 0"
+                )
 
     @contextmanager
     def session(self) -> Iterator[Session]:

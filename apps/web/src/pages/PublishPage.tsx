@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useState} from "react";
+import {useSearchParams} from "react-router-dom";
 
 import {
   API_BASE,
@@ -18,6 +19,7 @@ import {
   formatDateTime,
 } from "../components";
 import {usePolling} from "../hooks";
+import {accountRuleStore, contentMetaStore} from "../workspaceStore";
 import {PublishBatchPanel} from "./PublishBatchPanel";
 
 const stageLabels: Record<string, string> = {
@@ -53,6 +55,7 @@ const money = (value: number): string =>
   }).format(value / 10_000);
 
 export const PublishPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const {data: outputs} = usePolling(
     useCallback(() => api<GalleryOutput[]>("/api/outputs"), []),
     5000,
@@ -83,8 +86,21 @@ export const PublishPage: React.FC = () => {
   const [loginState, setLoginState] = useState<PublishLoginStatus | null>(null);
 
   useEffect(() => {
+    const requested = searchParams.get("output");
+    if (requested && outputs?.some((item) => item.output_id === requested)) {
+      setOutputId(requested);
+      return;
+    }
     if (!outputId && outputs?.[0]) setOutputId(outputs[0].output_id);
-  }, [outputId, outputs]);
+  }, [outputId, outputs, searchParams]);
+  useEffect(() => {
+    if (!outputId) return;
+    const meta = contentMetaStore.get(outputId);
+    if (!meta) return;
+    setTitle(meta.title);
+    setDescription(meta.description);
+    setTopics(meta.topics.join(" "));
+  }, [outputId]);
   useEffect(() => {
     if (!publishAccountId && accounts?.[0]) {
       const account = accounts[0];
@@ -211,6 +227,20 @@ export const PublishPage: React.FC = () => {
       });
       setSelectedId(created.publish_id);
     });
+
+  const useNextAccountSlot = () => {
+    if (!publishAccountId) return;
+    const rule = accountRuleStore.get(publishAccountId);
+    const [hour, minute] = rule.preferredTime.split(":").map(Number);
+    const next = new Date();
+    next.setHours(hour || 0, minute || 0, 0, 0);
+    if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+    const local = new Date(next.getTime() - next.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16);
+    setMode("scheduled");
+    setScheduledAt(local);
+  };
 
   const startJob = () =>
     run(() =>
@@ -365,6 +395,9 @@ export const PublishPage: React.FC = () => {
                   value={scheduledAt}
                   onChange={(event) => setScheduledAt(event.target.value)}
                 />
+                <button type="button" className="publish-slot-helper" onClick={useNextAccountSlot}>
+                  使用该账号的下一个固定时段
+                </button>
               </label>
             ) : <span />}
           </div>

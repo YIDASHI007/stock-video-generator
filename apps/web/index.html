@@ -7,10 +7,24 @@
       name="description"
       content="使用真实历史行情生成确定性股票持有回测视频"
     />
-    <title>股票历史回测视频生成器</title>
+    <title>内容自动化工作台</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("content-ops.theme");
+          const theme = saved === "light" || saved === "dark"
+            ? saved
+            : window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

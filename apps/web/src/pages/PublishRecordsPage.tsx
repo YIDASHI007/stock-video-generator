@@ -1,0 +1,18 @@
+import React, {useCallback, useMemo, useState} from "react";
+import {AlertTriangle, CheckCircle2, ExternalLink, FileSearch, RotateCcw, Search} from "lucide-react";
+import {api, type PublishAccount, type PublishJob} from "../api";
+import {ErrorNotice, formatDateTime} from "../components";
+import {usePolling} from "../hooks";
+
+export const PublishRecordsPage: React.FC = () => {
+  const loader = useCallback(() => api<PublishJob[]>("/api/publish/jobs?limit=500"), []);
+  const accountLoader = useCallback(() => api<PublishAccount[]>("/api/accounts"), []);
+  const {data, error, refresh} = usePolling(loader, 4_000);
+  const {data: accounts} = usePolling(accountLoader, 15_000);
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const records = useMemo(() => (data ?? []).filter((item) => (filter === "all" || (filter === "success" ? item.stage === "PUBLISHED" : filter === "failed" ? item.stage.includes("FAILED") || item.stage === "NEEDS_HUMAN" : ["CREATED", "MANIFEST_READY", "WAITING_APPROVAL", "SCHEDULED"].includes(item.stage))) && `${item.title}${item.account_id}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.created_at.localeCompare(a.created_at)), [data, filter, query]);
+  const retry = async (id: string) => {setBusy(id); try {await api(`/api/publish/jobs/${id}/retry`, {method: "POST"}); refresh();} finally {setBusy(null);}};
+  return <div className="page publish-records-page">{error ? <ErrorNotice message={error}/> : null}<header className="module-header"><div><span className="module-kicker">PUBLISHING HISTORY</span><h1>发布记录</h1><p>追踪每次发布的状态、平台结果、失败原因与自动化证据。</p></div></header><section className="record-toolbar"><label><Search size={15}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题或账号"/></label><div>{[["all", "全部"], ["success", "已发布"], ["waiting", "待执行"], ["failed", "异常"]].map(([value, label]) => <button key={value} type="button" className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div><span>{records.length} 条记录</span></section><section className="records-table"><div className="record-row record-head"><span>内容</span><span>发布账号</span><span>模式</span><span>状态</span><span>创建时间</span><span>操作</span></div>{records.map((item) => {const failed = item.stage.includes("FAILED") || item.stage === "NEEDS_HUMAN"; const success = item.stage === "PUBLISHED"; return <article key={item.publish_id} className="record-row"><span><strong>{item.title}</strong><small>{item.publish_id.slice(0, 8)} · {item.topics.slice(0, 2).map((topic) => `#${topic}`).join(" ")}</small></span><span>{accounts?.find((account) => account.account_id === item.account_id)?.display_name ?? item.account_id}</span><span>{item.mode === "scheduled" ? "定时发布" : item.mode === "immediate" ? "立即发布" : "仅预检"}</span><span><i className={`record-status ${success ? "success" : failed ? "failed" : "waiting"}`}>{success ? <CheckCircle2 size={13}/> : failed ? <AlertTriangle size={13}/> : <FileSearch size={13}/>} {success ? "已发布" : failed ? "需处理" : item.stage}</i>{item.error_reason ? <small className="record-error">{item.error_reason}</small> : null}</span><span>{formatDateTime(item.created_at)}</span><span className="record-actions">{failed ? <button type="button" disabled={busy === item.publish_id} onClick={() => void retry(item.publish_id)}><RotateCcw size={14}/> 重试</button> : null}{item.published_url ? <a href={item.published_url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> 查看</a> : null}</span></article>;})}{records.length === 0 ? <div className="asset-empty"><FileSearch size={28}/><strong>没有对应的发布记录</strong></div> : null}</section></div>;
+};

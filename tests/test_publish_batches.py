@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -121,6 +122,47 @@ def test_batch_interval_starts_after_confirmed_publish(tmp_path):
             next_run_at = next_run_at.replace(tzinfo=UTC)
         assert before + timedelta(seconds=295) <= next_run_at
         assert next_run_at <= datetime.now(UTC) + timedelta(seconds=305)
+
+
+def test_batch_random_delay_stays_inside_configured_window():
+    fixed = PublishBatchRecord(
+        batch_id="fixed",
+        name="fixed",
+        account_id="main",
+        interval_seconds=300,
+        random_delay_seconds=0,
+    )
+    jittered = PublishBatchRecord(
+        batch_id="jittered",
+        name="jittered",
+        account_id="main",
+        interval_seconds=300,
+        random_delay_seconds=120,
+    )
+
+    assert PublishBatchManager._next_delay_seconds(fixed) == 300
+    delays = [PublishBatchManager._next_delay_seconds(jittered) for _ in range(64)]
+    assert all(300 <= delay <= 420 for delay in delays)
+
+
+def test_existing_batch_database_is_upgraded_without_rebuild(tmp_path):
+    settings = Settings(data_dir=tmp_path / "data", log_dir=tmp_path / "logs")
+    database_path = settings.data_dir / "database" / "stock_video.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("CREATE TABLE publish_batches (batch_id VARCHAR PRIMARY KEY)")
+        connection.execute("INSERT INTO publish_batches (batch_id) VALUES ('legacy')")
+
+    database = Database(settings)
+    database.initialize()
+
+    with sqlite3.connect(database_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(publish_batches)")}
+        legacy = connection.execute(
+            "SELECT batch_id, random_delay_seconds FROM publish_batches WHERE batch_id = 'legacy'"
+        ).fetchone()
+    assert "random_delay_seconds" in columns
+    assert legacy == ("legacy", 0)
 
 
 def test_pause_request_finishes_active_item_then_pauses(tmp_path):
