@@ -5,6 +5,7 @@ import os
 from stock_video_generator.desktop import (
     DEFAULT_NO_PROXY,
     _configure_proxy_environment,
+    _resolve_node_executable,
 )
 
 
@@ -48,3 +49,34 @@ def test_configure_proxy_environment_can_be_disabled(monkeypatch):
     _configure_proxy_environment({"use_system_proxy": False})
 
     assert "HTTPS_PROXY" not in os.environ
+
+
+def test_resolve_node_uses_installed_runtime_as_development_fallback(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("NODE_EXECUTABLE", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr("stock_video_generator.desktop.shutil.which", lambda _name: None)
+    installed_node = (
+        tmp_path
+        / "local"
+        / "StockVideoGenerator"
+        / "current"
+        / "runtime"
+        / "node"
+        / "node.exe"
+    )
+    installed_node.parent.mkdir(parents=True)
+    installed_node.touch()
+
+    assert _resolve_node_executable(tmp_path / "source") == installed_node.resolve()
+
+
+def test_resolve_node_prefers_current_runtime(monkeypatch, tmp_path):
+    monkeypatch.delenv("NODE_EXECUTABLE", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    runtime_node = tmp_path / "source" / "runtime" / "node" / "node.exe"
+    runtime_node.parent.mkdir(parents=True)
+    runtime_node.touch()
+
+    assert _resolve_node_executable(tmp_path / "source") == runtime_node.resolve()
