@@ -25,6 +25,25 @@ $pyDistDir = Join-Path $OutputRoot "pyinstaller-dist"
 $pyWorkDir = Join-Path $OutputRoot "pyinstaller-work"
 $releaseDir = Join-Path $OutputRoot "Releases"
 $specDir = Join-Path $OutputRoot "spec"
+$appIcon = Join-Path $projectRoot "apps\api\src\stock_video_generator\assets\launch-center.ico"
+
+function Remove-DirectoryTree {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) {
+        return
+    }
+    $longPath = if ($fullPath.StartsWith("\\?\")) {
+        $fullPath
+    } else {
+        "\\?\$fullPath"
+    }
+    [System.IO.Directory]::Delete($longPath, $true)
+}
 
 function Convert-PnpmDeployToPortableNodeModules {
     param(
@@ -39,11 +58,13 @@ function Convert-PnpmDeployToPortableNodeModules {
     $modulesPath = Join-Path $packageRootPath "node_modules"
     $indexPath = Join-Path $modulesPath ".pnpm\node_modules"
     $portablePath = Join-Path $packageRootPath "node_modules-portable"
-    $legacyPath = Join-Path $packageRootPath "node_modules-pnpm"
+    $legacyRoot = Join-Path $OutputRoot "pnpm-deploy-cache"
+    $legacyName = $SelfPackageName.Replace("@", "").Replace("/", "-")
+    $legacyPath = Join-Path $legacyRoot $legacyName
     if (-not (Test-Path -LiteralPath $indexPath -PathType Container)) {
         throw "pnpm deploy index was not found: $indexPath"
     }
-    foreach ($candidate in @($modulesPath, $portablePath, $legacyPath)) {
+    foreach ($candidate in @($modulesPath, $portablePath)) {
         $candidatePath = [System.IO.Path]::GetFullPath($candidate)
         if (-not $candidatePath.StartsWith(
             $packageRootPath,
@@ -52,7 +73,15 @@ function Convert-PnpmDeployToPortableNodeModules {
             throw "Portable dependency path escaped package root: $candidatePath"
         }
     }
+    $legacyPath = [System.IO.Path]::GetFullPath($legacyPath)
+    if (-not $legacyPath.StartsWith(
+        $OutputRoot,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Deploy cache path escaped output root: $legacyPath"
+    }
 
+    New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $portablePath -Force | Out-Null
     foreach ($entry in Get-ChildItem -LiteralPath $indexPath -Force) {
         if ($entry.Name.StartsWith("@")) {
@@ -74,11 +103,10 @@ function Convert-PnpmDeployToPortableNodeModules {
 
     Move-Item -LiteralPath $modulesPath -Destination $legacyPath
     Move-Item -LiteralPath $portablePath -Destination $modulesPath
-    Remove-Item -LiteralPath $legacyPath -Recurse -Force
 }
 
 if (Test-Path -LiteralPath $OutputRoot) {
-    Remove-Item -LiteralPath $OutputRoot -Recurse -Force
+    Remove-DirectoryTree -Path $OutputRoot
 }
 New-Item -ItemType Directory -Path $stageDir, $releaseDir, $specDir -Force | Out-Null
 
@@ -113,11 +141,13 @@ Write-Host "[2/6] Freezing the Python desktop application..."
     --onedir `
     --windowed `
     --name StockVideoGenerator `
+    --icon $appIcon `
     --paths (Join-Path $projectRoot "apps\api\src") `
     --collect-all akshare `
     --collect-all patchright `
     --collect-all py_mini_racer `
     --collect-all velopack `
+    --add-data "$(Join-Path $projectRoot 'apps\api\src\stock_video_generator\assets');stock_video_generator/assets" `
     --distpath $pyDistDir `
     --workpath $pyWorkDir `
     --specpath $specDir `
@@ -196,6 +226,7 @@ Write-Host "[6/6] Building the Velopack installer and delta package..."
     --mainExe StockVideoGenerator.exe `
     --packTitle "Stock Video Generator" `
     --packAuthors "Stock Video Generator" `
+    --icon $appIcon `
     --shortcuts "Desktop,StartMenuRoot" `
     --channel win `
     --outputDir $releaseDir `

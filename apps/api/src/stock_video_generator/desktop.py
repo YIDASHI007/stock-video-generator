@@ -4,6 +4,7 @@ import argparse
 import importlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -27,6 +28,35 @@ DEFAULT_NO_PROXY = (
     ".sina.com.cn",
 )
 _NULL_STREAMS: list[Any] = []
+
+
+def _resolve_node_executable(runtime_dir: Path) -> Path | None:
+    configured = os.environ.get("NODE_EXECUTABLE")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_file():
+            return configured_path.resolve()
+        discovered = shutil.which(configured)
+        if discovered:
+            return Path(discovered).resolve()
+
+    candidates = [runtime_dir / "runtime" / "node" / "node.exe"]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(
+            Path(local_app_data)
+            / APP_NAME
+            / "current"
+            / "runtime"
+            / "node"
+            / "node.exe"
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+
+    discovered = shutil.which("node")
+    return Path(discovered).resolve() if discovered else None
 
 
 def _runtime_dir() -> Path:
@@ -128,9 +158,11 @@ def _configure_environment() -> tuple[Path, Path, int]:
     os.environ["APP_DATA_DIR"] = str(data_dir)
     os.environ["APP_LOG_DIR"] = str(log_dir)
     os.environ["APP_WEB_DIST_DIR"] = str(runtime_dir / "apps" / "web" / "dist")
-    packaged_node = runtime_dir / "runtime" / "node" / "node.exe"
-    if packaged_node.is_file():
-        os.environ["NODE_EXECUTABLE"] = str(packaged_node)
+    node_executable = _resolve_node_executable(runtime_dir)
+    if node_executable is not None:
+        os.environ["NODE_EXECUTABLE"] = str(node_executable)
+    else:
+        os.environ.pop("NODE_EXECUTABLE", None)
     return runtime_dir, log_dir, port
 
 
