@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import struct
 import subprocess
 from datetime import UTC, date, datetime
@@ -36,6 +37,7 @@ from stock_video_generator.models import SimulationResult
 from stock_video_generator.thumbnails import cover_path, find_ffmpeg
 
 PublishMode = Literal["dry_run", "immediate", "scheduled"]
+SocialPlatform = Literal["douyin", "xiaohongshu", "wechat_channels"]
 
 DISCLAIMER = "历史数据模拟，仅供信息展示，不构成投资建议。"
 DEFAULT_COLLECTION = "100万买股票十年后"
@@ -165,6 +167,7 @@ class PublishManifest(BaseModel):
 
 class PublishAccountCreate(BaseModel):
     account_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    platform: SocialPlatform = "douyin"
     display_name: str = Field(min_length=1, max_length=120)
     auto_publish_enabled: bool = False
 
@@ -772,11 +775,14 @@ class PublishingService:
         self.settings = settings
         self.database = database
 
-    def list_accounts(self) -> list[PublishAccountRecord]:
+    def list_accounts(self, platform: SocialPlatform | None = None) -> list[PublishAccountRecord]:
         with self.database.session() as session:
+            statement = select(PublishAccountRecord)
+            if platform is not None:
+                statement = statement.where(PublishAccountRecord.platform == platform)
             return list(
                 session.scalars(
-                    select(PublishAccountRecord).order_by(PublishAccountRecord.created_at)
+                    statement.order_by(PublishAccountRecord.created_at)
                 ).all()
             )
 
@@ -790,17 +796,65 @@ class PublishingService:
             if account is None:
                 account = PublishAccountRecord(
                     account_id=request.account_id,
+                    platform=request.platform,
                     display_name=request.display_name,
                     browser_profile_dir=str(profile),
                     auto_publish_enabled=request.auto_publish_enabled,
+                    auth_status="unknown",
                 )
                 session.add(account)
             else:
+                if account.platform != request.platform:
+                    raise ValueError("同一账号标识不能切换到其他平台")
                 account.display_name = request.display_name
                 account.auto_publish_enabled = request.auto_publish_enabled
                 account.enabled = True
             session.flush()
             return account
+
+    def unbind_account(self, account_id: str) -> PublishAccountRecord:
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            profile = Path(account.browser_profile_dir).resolve()
+            account.enabled = False
+            account.auto_publish_enabled = False
+            account.auth_status = "logged_out"
+            account.last_login_at = None
+            account.last_checked_at = datetime.now(UTC)
+            session.flush()
+            payload = account
+
+        account_root = (self.settings.data_dir / "publish-accounts").resolve()
+        if profile.exists():
+            if not profile.is_relative_to(account_root) or profile.name != "chrome-profile":
+                raise ValueError("账号浏览器目录不在允许的用户数据范围内")
+            shutil.rmtree(profile)
+        return payload
+
+    def delete_account(self, account_id: str) -> None:
+        """Permanently remove an already-unbound account and its local remnants."""
+        account_root = (self.settings.data_dir / "publish-accounts").resolve()
+        account_dir = (account_root / account_id).resolve()
+        if account_dir.parent != account_root:
+            raise ValueError("账号目录不在允许的用户数据范围内")
+
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            if account.enabled:
+                raise ValueError("请先解绑账号，再执行删除")
+
+        if account_dir.exists():
+            shutil.rmtree(account_dir)
+
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            session.delete(account)
 
     def _load_result(self, simulation: SimulationRecord) -> SimulationResult:
         return load_simulation_result(simulation)
@@ -1079,10 +1133,13 @@ def publish_job_payload(record: PublishJobRecord) -> dict[str, object]:
 def publish_account_payload(record: PublishAccountRecord) -> dict[str, object]:
     return {
         "account_id": record.account_id,
+        "platform": record.platform,
         "display_name": record.display_name,
         "enabled": record.enabled,
         "auto_publish_enabled": record.auto_publish_enabled,
+        "auth_status": record.auth_status,
         "last_login_at": record.last_login_at,
+        "last_checked_at": record.last_checked_at,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
     }

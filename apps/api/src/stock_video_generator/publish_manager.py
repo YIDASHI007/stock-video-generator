@@ -12,6 +12,7 @@ from stock_video_generator.database import (
     Database,
     PublishAccountRecord,
     PublishAttemptRecord,
+    PublishBatchRecord,
     PublishJobRecord,
     PublishStage,
 )
@@ -23,6 +24,11 @@ from stock_video_generator.douyin_publisher import (
     PublishNeedsSms,
 )
 from stock_video_generator.publishing import PublishingService
+from stock_video_generator.social_account_auth import (
+    PLATFORM_AUTH_SPECS,
+    SocialAccountAuthenticator,
+    SocialPlatform,
+)
 
 ACTIVE_STAGES = {
     PublishStage.VALIDATING_ARTIFACTS,
@@ -66,6 +72,7 @@ class PublishManager:
         self.database = database
         self.service = service
         self.publisher = DouyinBrowserPublisher(settings)
+        self.account_auth = SocialAccountAuthenticator(settings)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._login_tasks: dict[str, asyncio.Task[None]] = {}
         self._login_states: dict[str, dict[str, object]] = {}
@@ -134,6 +141,11 @@ class PublishManager:
                     record.stage = PublishStage.FAILED_FINAL
                     record.error_type = "ACCOUNT_NOT_FOUND"
                     record.error_reason = "发布账号不存在"
+                    return
+                if account.platform != "douyin":
+                    record.stage = PublishStage.FAILED_FINAL
+                    record.error_type = "PLATFORM_NOT_SUPPORTED"
+                    record.error_reason = "当前自动发布流程暂时只支持抖音账号"
                     return
                 # 新任务默认已经是精简互动文案；这里同时兼容清理尚未发布的
                 # 旧任务，且只匹配系统生成的完整说明，不覆盖手工文案。
@@ -316,7 +328,7 @@ class PublishManager:
 
     def start_login(self, account_id: str) -> dict[str, object]:
         if account_id in self._login_tasks:
-            raise ValueError("该账号的登录窗口已经打开")
+            raise ValueError("该账号的扫码登录已经启动")
         with self.database.session() as session:
             account = session.get(PublishAccountRecord, account_id)
             if account is None:
@@ -330,40 +342,82 @@ class PublishManager:
             if active_publish is not None:
                 raise ValueError("该账号正在执行发布任务，暂时不能打开登录窗口")
             profile_dir = Path(account.browser_profile_dir)
+            platform = account.platform
+            label = PLATFORM_AUTH_SPECS[platform].label
         self._login_states[account_id] = {
             "account_id": account_id,
-            "status": "opening",
-            "message": "正在打开抖音扫码登录窗口",
+            "status": "preparing_qr",
+            "message": f"正在获取{label}官方登录二维码",
             "updated_at": datetime.now(UTC),
         }
         task = asyncio.create_task(
-            self._login(account_id, profile_dir),
+            self._login(account_id, platform, profile_dir),
             name=f"publish-login-{account_id}",
         )
         self._login_tasks[account_id] = task
         task.add_done_callback(lambda _: self._login_tasks.pop(account_id, None))
         return self.login_status(account_id)
 
-    async def _login(self, account_id: str, profile_dir: Path) -> None:
+    async def _login(
+        self,
+        account_id: str,
+        platform: SocialPlatform,
+        profile_dir: Path,
+    ) -> None:
         evidence_dir = self.settings.data_dir / "publish-accounts" / account_id / "login-evidence"
-        self._login_states[account_id] = {
-            "account_id": account_id,
-            "status": "waiting_scan",
-            "message": "请在弹出的浏览器窗口中扫码登录",
-            "updated_at": datetime.now(UTC),
-        }
+        label = PLATFORM_AUTH_SPECS[platform].label
+
+        async def on_qr_ready(path: Path) -> None:
+            current = self._login_states.get(account_id, {})
+            self._login_states[account_id] = {
+                **current,
+                "account_id": account_id,
+                "status": (
+                    current.get("status")
+                    if current.get("status") == "scanned"
+                    else "waiting_scan"
+                ),
+                "message": (
+                    current.get("message")
+                    if current.get("status") == "scanned"
+                    else f"请使用手机扫码登录{label}"
+                ),
+                "qr_code_path": str(path),
+                "qr_code_url": f"/api/accounts/{account_id}/login/qr",
+                "qr_revision": int(datetime.now(UTC).timestamp() * 1000),
+                "updated_at": datetime.now(UTC),
+            }
+
+        async def on_progress(status_value: str, message: str) -> None:
+            current = self._login_states.get(account_id, {})
+            self._login_states[account_id] = {
+                **current,
+                "account_id": account_id,
+                "status": status_value,
+                "message": message,
+                "updated_at": datetime.now(UTC),
+            }
+
         try:
-            screenshot, dom = await self.publisher.login(profile_dir, evidence_dir)
+            result = await self.account_auth.login(
+                platform,
+                profile_dir,
+                evidence_dir,
+                on_qr_ready=on_qr_ready,
+                on_progress=on_progress,
+            )
             with self.database.session() as session:
                 account = session.get(PublishAccountRecord, account_id)
                 if account is not None:
                     account.last_login_at = datetime.now(UTC)
+                    account.last_checked_at = datetime.now(UTC)
+                    account.auth_status = "logged_in"
             self._login_states[account_id] = {
                 "account_id": account_id,
                 "status": "logged_in",
-                "message": "登录成功，会话已保存",
-                "screenshot_path": screenshot,
-                "dom_snapshot_path": dom,
+                "message": f"{label}登录成功，会话已保存",
+                "screenshot_path": result.screenshot_path,
+                "dom_snapshot_path": result.dom_snapshot_path,
                 "updated_at": datetime.now(UTC),
             }
         except asyncio.CancelledError:
@@ -375,6 +429,11 @@ class PublishManager:
             }
             raise
         except Exception as exc:
+            with self.database.session() as session:
+                account = session.get(PublishAccountRecord, account_id)
+                if account is not None:
+                    account.auth_status = "login_failed"
+                    account.last_checked_at = datetime.now(UTC)
             self._login_states[account_id] = {
                 "account_id": account_id,
                 "status": "failed",
@@ -389,6 +448,8 @@ class PublishManager:
             if account is None:
                 raise KeyError("account")
             last_login_at = account.last_login_at
+            platform = account.platform
+            auth_status = account.auth_status
         state = self._login_states.get(
             account_id,
             {
@@ -398,4 +459,109 @@ class PublishManager:
                 "updated_at": datetime.now(UTC),
             },
         )
-        return {**state, "last_login_at": last_login_at}
+        return {
+            **{key: value for key, value in state.items() if key != "qr_code_path"},
+            "platform": platform,
+            "auth_status": auth_status,
+            "last_login_at": last_login_at,
+        }
+
+    def login_qr_path(self, account_id: str) -> Path:
+        with self.database.session() as session:
+            if session.get(PublishAccountRecord, account_id) is None:
+                raise KeyError("account")
+        state = self._login_states.get(account_id, {})
+        value = state.get("qr_code_path")
+        if not isinstance(value, str):
+            raise ValueError("二维码尚未生成")
+        path = Path(value).resolve()
+        expected_root = (
+            self.settings.data_dir / "publish-accounts" / account_id / "login-evidence"
+        ).resolve()
+        if expected_root not in path.parents or not path.is_file():
+            raise ValueError("二维码尚未生成或已经失效")
+        return path
+
+    def cancel_login(self, account_id: str) -> dict[str, object]:
+        with self.database.session() as session:
+            if session.get(PublishAccountRecord, account_id) is None:
+                raise KeyError("account")
+        task = self._login_tasks.get(account_id)
+        if task is not None and not task.done():
+            task.cancel()
+        current = self._login_states.get(account_id, {})
+        self._login_states[account_id] = {
+            **{key: value for key, value in current.items() if key != "qr_code_path"},
+            "account_id": account_id,
+            "status": "cancelled",
+            "message": "已取消扫码登录",
+            "updated_at": datetime.now(UTC),
+        }
+        return self.login_status(account_id)
+
+    async def check_account(self, account_id: str) -> dict[str, object]:
+        if account_id in self._login_tasks:
+            raise ValueError("该账号正在等待扫码，暂时不能检测")
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            platform: SocialPlatform = account.platform
+            profile_dir = Path(account.browser_profile_dir)
+        evidence_dir = (
+            self.settings.data_dir / "publish-accounts" / account_id / "login-evidence"
+        )
+        result = await self.account_auth.check(platform, profile_dir, evidence_dir)
+        checked_at = datetime.now(UTC)
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            account.auth_status = "logged_in" if result.logged_in else "logged_out"
+            account.last_checked_at = checked_at
+            if result.logged_in:
+                account.last_login_at = account.last_login_at or checked_at
+        label = PLATFORM_AUTH_SPECS[platform].label
+        return {
+            "account_id": account_id,
+            "platform": platform,
+            "status": "logged_in" if result.logged_in else "logged_out",
+            "message": f"{label}登录状态正常" if result.logged_in else f"{label}登录已失效",
+            "last_login_at": account.last_login_at,
+            "updated_at": checked_at,
+        }
+
+    def unbind_account(self, account_id: str) -> PublishAccountRecord:
+        if account_id in self._login_tasks:
+            raise ValueError("该账号正在等待扫码，请先关闭登录窗口")
+        with self.database.session() as session:
+            active_publish = session.scalar(
+                select(PublishJobRecord).where(
+                    PublishJobRecord.account_id == account_id,
+                    PublishJobRecord.stage.in_(ACTIVE_STAGES),
+                )
+            )
+        if active_publish is not None:
+            raise ValueError("该账号正在执行发布任务，暂时不能解绑")
+        self._login_states.pop(account_id, None)
+        return self.service.unbind_account(account_id)
+
+    def delete_account(self, account_id: str) -> None:
+        if account_id in self._login_tasks:
+            raise ValueError("该账号正在等待扫码，请先关闭登录窗口")
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            if account.enabled:
+                raise ValueError("请先解绑账号，再执行删除")
+            publish_job = session.scalar(
+                select(PublishJobRecord).where(PublishJobRecord.account_id == account_id)
+            )
+            publish_batch = session.scalar(
+                select(PublishBatchRecord).where(PublishBatchRecord.account_id == account_id)
+            )
+        if publish_job is not None or publish_batch is not None:
+            raise ValueError("该账号存在发布记录或批量任务，不能直接删除")
+        self._login_states.pop(account_id, None)
+        self.service.delete_account(account_id)

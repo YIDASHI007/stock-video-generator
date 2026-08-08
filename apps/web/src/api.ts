@@ -108,13 +108,17 @@ export type Output = {
 /* ---------------- 抖音发布 ---------------- */
 
 export type PublishMode = "dry_run" | "immediate" | "scheduled";
+export type SocialPlatform = "douyin" | "xiaohongshu" | "wechat_channels";
 
 export type PublishAccount = {
   account_id: string;
+  platform: SocialPlatform;
   display_name: string;
   enabled: boolean;
   auto_publish_enabled: boolean;
+  auth_status: "unknown" | "logged_in" | "logged_out" | "login_failed";
   last_login_at: string | null;
+  last_checked_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -197,8 +201,20 @@ export type PublishJob = {
 
 export type PublishLoginStatus = {
   account_id: string;
-  status: "idle" | "opening" | "waiting_scan" | "logged_in" | "failed" | "cancelled";
+  platform: SocialPlatform;
+  auth_status: PublishAccount["auth_status"];
+  status:
+    | "idle"
+    | "preparing_qr"
+    | "waiting_scan"
+    | "scanned"
+    | "logged_in"
+    | "logged_out"
+    | "failed"
+    | "cancelled";
   message: string;
+  qr_code_url?: string;
+  qr_revision?: number;
   last_login_at: string | null;
   updated_at: string;
 };
