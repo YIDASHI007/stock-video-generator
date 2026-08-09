@@ -382,7 +382,8 @@ def main() -> int:
     _ensure_standard_streams()
     _bootstrap_log(f"Starting with arguments: {sys.argv[1:]!r}")
     is_server_process = "--serve" in sys.argv[1:]
-    if not is_server_process:
+    is_update_download_process = "--download-update" in sys.argv[1:]
+    if not is_server_process and not is_update_download_process:
         try:
             from velopack import App
 
@@ -395,8 +396,23 @@ def main() -> int:
     runtime_dir, log_dir, default_port = _configure_environment()
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--download-update", action="store_true")
+    parser.add_argument("--update-version")
+    parser.add_argument("--update-progress-file")
     parser.add_argument("--port", type=int, default=default_port)
     arguments, _ = parser.parse_known_args()
+    if arguments.download_update:
+        if not arguments.update_progress_file:
+            _log(log_dir, "Update download worker is missing its progress file.")
+            return 2
+        from stock_video_generator.launcher_gui import run_update_download_worker
+
+        return run_update_download_worker(
+            runtime_dir,
+            log_dir,
+            Path(arguments.update_progress_file).expanduser().resolve(),
+            arguments.update_version,
+        )
     if arguments.serve:
         _bootstrap_log(f"Starting API service on port {arguments.port}.")
         return _run_server(arguments.port)
