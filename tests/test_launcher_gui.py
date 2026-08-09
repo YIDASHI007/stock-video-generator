@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from stock_video_generator.launcher_gui import (
     SINGLE_INSTANCE_PREFIX,
     SingleInstanceGuard,
     _acquire_single_instance,
+    _estimate_update_size,
+    _format_download_eta,
+    _format_download_size,
     _is_expected_server,
     run_launcher_gui,
+    run_update_download_worker,
 )
 
 
@@ -100,3 +107,70 @@ def test_duplicate_launcher_opens_existing_workbench_without_creating_window(
 
     assert result == 0
     assert opened == ["http://127.0.0.1:8877"]
+
+
+def test_update_size_prefers_delta_chain() -> None:
+    update = SimpleNamespace(
+        DeltasToTarget=[SimpleNamespace(Size=120), SimpleNamespace(Size=80)],
+        TargetFullRelease=SimpleNamespace(Size=900),
+    )
+
+    assert _estimate_update_size(update) == 200
+
+
+def test_update_size_falls_back_to_full_release() -> None:
+    update = SimpleNamespace(
+        DeltasToTarget=[], TargetFullRelease=SimpleNamespace(Size=4096)
+    )
+
+    assert _estimate_update_size(update) == 4096
+
+
+def test_download_labels_are_compact_and_readable() -> None:
+    assert _format_download_size(0) == "0B"
+    assert _format_download_size(2.5 * 1024 * 1024) == "2.5MB"
+    assert _format_download_eta(12) == "约 12 秒"
+    assert _format_download_eta(125) == "约 2 分 05 秒"
+
+
+def test_update_download_worker_reports_progress(monkeypatch, tmp_path) -> None:
+    target = SimpleNamespace(Version="0.1.6", Size=1024)
+    update = SimpleNamespace(DeltasToTarget=[], TargetFullRelease=target)
+
+    class FakeUpdateManager:
+        def __init__(self, _source) -> None:
+            pass
+
+        def get_is_portable(self) -> bool:
+            return False
+
+        def check_for_updates(self):
+            return update
+
+        def download_updates(self, _update, progress_callback) -> None:
+            progress_callback(20)
+            progress_callback(70)
+            progress_callback(100)
+
+    fake_module = SimpleNamespace(
+        GithubSource=lambda url: url,
+        UpdateManager=FakeUpdateManager,
+    )
+    monkeypatch.setitem(sys.modules, "velopack", fake_module)
+    monkeypatch.setattr(
+        "stock_video_generator.desktop._update_repo_url",
+        lambda _runtime: "https://github.com/example/releases",
+    )
+    monkeypatch.setattr("stock_video_generator.desktop._log", lambda *_args: None)
+    progress_file = tmp_path / "progress.json"
+
+    result = run_update_download_worker(
+        tmp_path, tmp_path, progress_file, requested_version="0.1.6"
+    )
+
+    payload = json.loads(progress_file.read_text(encoding="utf-8"))
+    assert result == 0
+    assert payload["state"] == "complete"
+    assert payload["progress"] == 100
+    assert payload["total_bytes"] == 1024
+    assert payload["version"] == "0.1.6"

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import webbrowser
@@ -33,6 +34,8 @@ ICON_ERROR = "\ue711"
 ICON_PLAY = "\ue768"
 ERROR_ALREADY_EXISTS = 183
 SINGLE_INSTANCE_PREFIX = "Local\\StockVideoGenerator.Launcher"
+UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+UPDATE_PROGRESS_POLL_MS = 140
 
 
 def _asset_path(name: str) -> Path:
@@ -62,6 +65,127 @@ def _http_json(url: str, timeout: float = 5) -> dict[str, Any] | list[Any]:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _estimate_update_size(update_info: Any) -> int:
+    deltas = list(getattr(update_info, "DeltasToTarget", None) or [])
+    if deltas:
+        total = sum(max(0, int(getattr(asset, "Size", 0) or 0)) for asset in deltas)
+        if total > 0:
+            return total
+    target = getattr(update_info, "TargetFullRelease", None)
+    return max(0, int(getattr(target, "Size", 0) or 0))
+
+
+def _format_download_size(size: float) -> str:
+    value = max(0.0, float(size))
+    for suffix in ("B", "KB", "MB", "GB"):
+        if value < 1024 or suffix == "GB":
+            precision = 0 if suffix == "B" else 1
+            return f"{value:.{precision}f}{suffix}"
+        value /= 1024
+    return "0B"
+
+
+def _format_download_eta(seconds: float | None) -> str:
+    if seconds is None or seconds < 0 or seconds == float("inf"):
+        return "计算中"
+    rounded = int(seconds + 0.5)
+    if rounded < 60:
+        return f"约 {max(1, rounded)} 秒"
+    minutes, remainder = divmod(rounded, 60)
+    if minutes < 60:
+        return f"约 {minutes} 分 {remainder:02d} 秒"
+    hours, minutes = divmod(minutes, 60)
+    return f"约 {hours} 小时 {minutes:02d} 分"
+
+
+def _write_update_progress(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def run_update_download_worker(
+    runtime_dir: Path,
+    log_dir: Path,
+    progress_path: Path,
+    requested_version: str | None,
+) -> int:
+    """Download an update in an isolated process so the launcher can cancel it."""
+    from velopack import GithubSource, UpdateManager
+
+    from stock_video_generator.desktop import _log, _update_repo_url
+
+    version = (requested_version or "").lstrip("v")
+
+    def emit(
+        state: str,
+        *,
+        progress: int = 0,
+        total_bytes: int = 0,
+        message: str = "",
+    ) -> None:
+        _write_update_progress(
+            progress_path,
+            {
+                "state": state,
+                "progress": max(0, min(100, int(progress))),
+                "total_bytes": max(0, int(total_bytes)),
+                "version": version,
+                "message": message,
+                "updated_at": time.time(),
+            },
+        )
+
+    try:
+        emit("preparing", message="正在连接更新服务器")
+        repo_url = _update_repo_url(runtime_dir)
+        if not repo_url:
+            raise RuntimeError("没有配置更新地址")
+        manager = UpdateManager(GithubSource(repo_url))
+        if manager.get_is_portable():
+            raise RuntimeError("便携模式不支持自动更新")
+        update = manager.check_for_updates()
+        if update is None:
+            raise RuntimeError("没有找到可下载的新版本")
+        available_version = str(update.TargetFullRelease.Version).lstrip("v")
+        if version and available_version != version:
+            raise RuntimeError(
+                f"目标版本已变化：请求 v{version}，当前为 v{available_version}"
+            )
+        version = available_version
+        total_bytes = _estimate_update_size(update)
+        emit("downloading", total_bytes=total_bytes, message="开始下载更新")
+
+        def on_progress(value: int) -> None:
+            emit(
+                "downloading",
+                progress=value,
+                total_bytes=total_bytes,
+                message="正在下载更新",
+            )
+
+        manager.download_updates(update, progress_callback=on_progress)
+        emit(
+            "complete",
+            progress=100,
+            total_bytes=total_bytes,
+            message="下载完成",
+        )
+        return 0
+    except BaseException as exc:
+        message = str(exc).strip() or exc.__class__.__name__
+        try:
+            emit("failed", message=message)
+        except OSError:
+            pass
+        _log(log_dir, f"Update download worker failed: {exc!r}")
+        return 1
 
 
 def _listener_owner(port: int) -> psutil.Process | None:
@@ -268,6 +392,29 @@ class StepProgress(Canvas):
             self.create_oval(x - 3, 4, x + 3, 10, fill=color, outline="")
 
 
+class DownloadProgress(Canvas):
+    def __init__(self, parent: Any) -> None:
+        super().__init__(
+            parent,
+            width=302,
+            height=8,
+            background=SURFACE,
+            highlightthickness=0,
+            bd=0,
+        )
+        self.set_value(0)
+
+    def set_value(self, value: float) -> None:
+        self.delete("all")
+        width = 302
+        height = 6
+        progress = max(0.0, min(100.0, float(value)))
+        self.create_rectangle(0, 1, width, height + 1, fill="#2b2d39", outline="")
+        filled = int(width * progress / 100)
+        if filled > 0:
+            self.create_rectangle(0, 1, filled, height + 1, fill=PURPLE, outline="")
+
+
 class LauncherWindow:
     def __init__(
         self, runtime_dir: Path, log_dir: Path, port: int, *, auto_start: bool = True
@@ -280,6 +427,14 @@ class LauncherWindow:
         self.update_manager: Any | None = None
         self.update_info: Any | None = None
         self.tray_icon: Any | None = None
+        self.update_download_process: subprocess.Popen[bytes] | None = None
+        self.update_progress_path = self.log_dir / "launcher-update-progress.json"
+        self._download_cancelled = False
+        self._download_last_time = 0.0
+        self._download_last_bytes = 0.0
+        self._download_speed = 0.0
+        self._periodic_update_timer: str | None = None
+        self._workbench_opened = False
         self._update_busy = False
         self._exiting = False
         self._motion_enabled = _client_animations_enabled()
@@ -382,6 +537,67 @@ class LauncherWindow:
             highlightthickness=0,
         )
         self.later_button.pack(side="left", padx=(8, 0))
+
+        self.download_panel = Frame(
+            stage,
+            background=SURFACE,
+            width=350,
+            height=110,
+            highlightbackground=LINE,
+            highlightthickness=1,
+        )
+        self.download_panel.pack_propagate(False)
+        self.download_title_text = StringVar(value="正在准备更新")
+        self.download_pct_text = StringVar(value="0%")
+        self.download_detail_text = StringVar(value="正在连接更新服务器")
+        self.download_rate_text = StringVar(value="")
+        Label(
+            self.download_panel,
+            textvariable=self.download_title_text,
+            foreground=TEXT,
+            background=SURFACE,
+            font=(UI_FONT, 10, "bold"),
+        ).place(x=18, y=12)
+        Label(
+            self.download_panel,
+            textvariable=self.download_pct_text,
+            foreground=PURPLE,
+            background=SURFACE,
+            font=(UI_FONT, 9, "bold"),
+        ).place(x=331, y=13, anchor="ne")
+        self.download_progress = DownloadProgress(self.download_panel)
+        self.download_progress.place(x=18, y=39)
+        Label(
+            self.download_panel,
+            textvariable=self.download_detail_text,
+            foreground=MUTED,
+            background=SURFACE,
+            font=(UI_FONT, 8),
+        ).place(x=18, y=55)
+        Label(
+            self.download_panel,
+            textvariable=self.download_rate_text,
+            foreground=MUTED,
+            background=SURFACE,
+            font=(UI_FONT, 8),
+        ).place(x=331, y=55, anchor="ne")
+        self.cancel_download_button = Button(
+            self.download_panel,
+            text="取消下载",
+            command=self._cancel_update_download,
+            background="#242631",
+            activebackground="#30323f",
+            foreground=TEXT,
+            activeforeground=TEXT,
+            font=(UI_FONT, 8),
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.cancel_download_button.place(x=331, y=78, anchor="ne")
 
     def _background(self, work: Callable[[], Any], done: Callable[[Any], None]) -> None:
         def runner() -> None:
@@ -605,21 +821,35 @@ class LauncherWindow:
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
         self.root.after(480, self._open_workbench)
 
-    def _show_update_prompt(self, *, failed: bool = False) -> None:
+    def _show_update_prompt(
+        self, *, failed: bool = False, cancelled: bool = False
+    ) -> None:
         version = self.update_info.TargetFullRelease.Version
-        self.status_text.set(
-            "更新失败，请重试" if failed else f"发现新版本 v{version}"
-        )
+        if failed:
+            message = "更新失败，请重试"
+        elif cancelled:
+            message = "下载已取消"
+        else:
+            message = f"发现新版本 v{version}"
+        self.status_text.set(message)
         self.status_label.set_color(RED if failed else PURPLE)
         self.status_indicator.set_result("error" if failed else "warning")
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
+        self.download_panel.place_forget()
         self.step_progress.place_forget()
         self.update_button.configure(
-            text="重新更新" if failed else f"更新到 v{version}",
+            text=(
+                "重新更新"
+                if failed
+                else "重新下载"
+                if cancelled
+                else f"更新到 v{version}"
+            ),
             state="normal",
         )
         self.later_button.configure(state="normal")
         self.update_actions.place(relx=0.5, y=246, anchor="n")
+        self.cancel_download_button.configure(text="取消下载", state="normal")
         self._update_busy = False
 
     def _install_update(self) -> None:
@@ -631,13 +861,159 @@ class LauncherWindow:
         ):
             return
         self._update_busy = True
+        self._download_cancelled = False
         self.update_actions.place_forget()
+        self.status_row.place_forget()
+        self.step_progress.place_forget()
         version = self.update_info.TargetFullRelease.Version
-        self._show_loading(f"正在下载 v{version}")
-        self._background(
-            lambda: self.update_manager.download_updates(self.update_info),
-            self._on_update_downloaded,
+        total_bytes = _estimate_update_size(self.update_info)
+        self.download_title_text.set(f"正在准备 v{version}")
+        self.download_pct_text.set("0%")
+        self.download_detail_text.set(
+            f"0B / {_format_download_size(total_bytes)}"
+            if total_bytes
+            else "正在连接更新服务器"
         )
+        self.download_rate_text.set("")
+        self.download_progress.set_value(0)
+        self.cancel_download_button.configure(text="取消下载", state="normal")
+        self.cancel_download_button.place(x=331, y=78, anchor="ne")
+        self.download_panel.place(relx=0.5, y=168, anchor="n")
+        self._start_update_download_process(version)
+
+    def _start_update_download_process(self, version: Any) -> None:
+        from stock_video_generator.desktop import _self_command
+
+        try:
+            self.update_progress_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        command = _self_command(
+            "--download-update",
+            "--update-version",
+            str(version),
+            "--update-progress-file",
+            str(self.update_progress_path),
+        )
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = (
+                subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        try:
+            self.update_download_process = subprocess.Popen(
+                command,
+                cwd=self.runtime_dir,
+                env=os.environ.copy(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags,
+            )
+        except OSError:
+            self.update_download_process = None
+            self._show_update_prompt(failed=True)
+            return
+        self._download_last_time = time.monotonic()
+        self._download_last_bytes = 0.0
+        self._download_speed = 0.0
+        self.root.after(UPDATE_PROGRESS_POLL_MS, self._poll_update_download)
+
+    def _read_update_progress(self) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(self.update_progress_path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def _poll_update_download(self) -> None:
+        if self._exiting or self._download_cancelled:
+            return
+        process = self.update_download_process
+        if process is None:
+            return
+        payload = self._read_update_progress()
+        if payload:
+            self._update_download_ui(payload)
+        return_code = process.poll()
+        if return_code is None:
+            self.root.after(UPDATE_PROGRESS_POLL_MS, self._poll_update_download)
+            return
+        self.update_download_process = None
+        state = str((payload or {}).get("state", ""))
+        if return_code == 0 and state == "complete":
+            self._on_update_downloaded((True, payload))
+        else:
+            self._show_update_prompt(failed=True)
+
+    def _update_download_ui(self, payload: dict[str, Any]) -> None:
+        state = str(payload.get("state", ""))
+        progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
+        total_bytes = max(0, int(payload.get("total_bytes", 0) or 0))
+        version = str(payload.get("version", "")).lstrip("v")
+        downloaded = total_bytes * progress / 100
+        now = time.monotonic()
+        elapsed = now - self._download_last_time
+        if elapsed >= 0.35 and downloaded >= self._download_last_bytes:
+            instant_speed = (downloaded - self._download_last_bytes) / elapsed
+            if instant_speed > 0:
+                self._download_speed = (
+                    instant_speed
+                    if self._download_speed <= 0
+                    else self._download_speed * 0.7 + instant_speed * 0.3
+                )
+            self._download_last_time = now
+            self._download_last_bytes = downloaded
+
+        if state == "preparing":
+            self.download_title_text.set(f"正在准备 v{version}" if version else "正在准备更新")
+            self.download_detail_text.set("正在连接更新服务器")
+        elif state == "complete":
+            self.download_title_text.set("下载完成，正在安装")
+        else:
+            self.download_title_text.set(f"正在下载 v{version}" if version else "正在下载更新")
+        self.download_pct_text.set(f"{progress}%")
+        self.download_progress.set_value(progress)
+        if total_bytes:
+            self.download_detail_text.set(
+                f"{_format_download_size(downloaded)} / {_format_download_size(total_bytes)}"
+            )
+        if self._download_speed > 0 and total_bytes > downloaded:
+            eta = (total_bytes - downloaded) / self._download_speed
+            self.download_rate_text.set(
+                f"{_format_download_size(self._download_speed)}/s"
+                f" · 剩余 {_format_download_eta(eta)}"
+            )
+        elif state == "downloading":
+            self.download_rate_text.set("正在计算速度")
+
+    def _cancel_update_download(self) -> None:
+        process = self.update_download_process
+        if self._exiting or process is None or process.poll() is not None:
+            return
+        self._download_cancelled = True
+        self.cancel_download_button.configure(text="正在取消…", state="disabled")
+        self._background(self._stop_update_download_process, self._after_download_cancelled)
+
+    def _stop_update_download_process(self) -> None:
+        process = self.update_download_process
+        if process is None or process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def _after_download_cancelled(self, _result: tuple[bool, Any]) -> None:
+        self.update_download_process = None
+        try:
+            self.update_progress_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if not self._exiting:
+            self._show_update_prompt(cancelled=True)
 
     def _on_update_downloaded(self, result: tuple[bool, Any]) -> None:
         if self._exiting:
@@ -646,9 +1022,12 @@ class LauncherWindow:
         if not ok:
             self._show_update_prompt(failed=True)
             return
-        self.status_text.set("下载完成，正在安装")
-        self.status_label.set_color(GREEN)
-        self.status_indicator.set_result("ok")
+        self.download_title_text.set("下载完成，正在安装")
+        self.download_pct_text.set("100%")
+        self.download_progress.set_value(100)
+        self.download_detail_text.set("安装完成后工作台将自动重启")
+        self.download_rate_text.set("")
+        self.cancel_download_button.place_forget()
         self.root.after(320, self._apply_update)
 
     def _apply_update(self) -> None:
@@ -715,6 +1094,7 @@ class LauncherWindow:
             pass
 
     def _tray_open(self, _icon: Any = None, _item: Any = None) -> None:
+        self._workbench_opened = True
         webbrowser.open(self.base_url)
 
     def _tray_check_update(self, _icon: Any = None, _item: Any = None) -> None:
@@ -742,6 +1122,51 @@ class LauncherWindow:
             return
         version = update.TargetFullRelease.Version
         self._notify_tray(f"发现新版本 v{version}")
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self._show_update_prompt()
+
+    def _schedule_periodic_update_check(
+        self, delay_ms: int = UPDATE_CHECK_INTERVAL_MS
+    ) -> None:
+        if self._exiting:
+            return
+        if self._periodic_update_timer is not None:
+            try:
+                self.root.after_cancel(self._periodic_update_timer)
+            except Exception:
+                pass
+        self._periodic_update_timer = self.root.after(
+            delay_ms, self._run_periodic_update_check
+        )
+
+    def _run_periodic_update_check(self) -> None:
+        self._periodic_update_timer = None
+        if self._exiting:
+            return
+        if self._update_busy:
+            self._schedule_periodic_update_check(5 * 60 * 1000)
+            return
+        self._update_busy = True
+        self._background(self._check_update, self._handle_periodic_update_result)
+
+    def _handle_periodic_update_result(self, result: tuple[bool, Any]) -> None:
+        if self._exiting:
+            return
+        ok, value = result
+        self._update_busy = False
+        if not ok:
+            self._schedule_periodic_update_check()
+            return
+        manager, update, _current = value
+        self.update_manager = manager
+        self.update_info = update
+        if update is None:
+            self._schedule_periodic_update_check()
+            return
+        version = update.TargetFullRelease.Version
+        self._notify_tray(f"发现新版本 v{version}，可立即下载更新")
         self.root.deiconify()
         self.root.lift()
         self.root.attributes("-topmost", True)
@@ -785,11 +1210,21 @@ class LauncherWindow:
             return
         self._exiting = True
         self._stop_tray()
+        if self._periodic_update_timer is not None:
+            try:
+                self.root.after_cancel(self._periodic_update_timer)
+            except Exception:
+                pass
+            self._periodic_update_timer = None
 
         def done(_result: tuple[bool, Any]) -> None:
             self.root.destroy()
 
-        self._background(self._stop_service, done)
+        def work() -> None:
+            self._stop_update_download_process()
+            self._stop_service()
+
+        self._background(work, done)
 
     def _handle_escape(self, _event: Any = None) -> None:
         if self.tray_icon is None:
@@ -812,7 +1247,10 @@ class LauncherWindow:
             self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
             self.root.bind("<Button-1>", lambda _event: self._exit_app())
             return
-        webbrowser.open(self.base_url)
+        if not self._workbench_opened:
+            webbrowser.open(self.base_url)
+            self._workbench_opened = True
+        self._schedule_periodic_update_check()
         self.root.withdraw()
 
     def run(self) -> int:
