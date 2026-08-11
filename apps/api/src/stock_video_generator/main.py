@@ -1593,7 +1593,10 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
 
         @app.get("/", include_in_schema=False)
         async def web_index() -> FileResponse:
-            return FileResponse(web_dist_dir / "index.html")
+            return FileResponse(
+                web_dist_dir / "index.html",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
 
         @app.get("/{web_path:path}", include_in_schema=False)
         async def web_fallback(web_path: str) -> FileResponse:
@@ -1606,7 +1609,10 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
                 return FileResponse(candidate)
             if web_path.startswith("api/"):
                 raise HTTPException(status_code=404, detail="Not found")
-            return FileResponse(web_dist_dir / "index.html")
+            return FileResponse(
+                web_dist_dir / "index.html",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
 
     return app
 

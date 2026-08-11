@@ -8,24 +8,29 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import Button, Canvas, Frame, Label, PhotoImage, StringVar, Tk
 from typing import Any
 
 import psutil
 
-BACKGROUND = "#0b0c12"
-SURFACE = "#11121a"
-LINE = "#292b38"
-TEXT = "#f4f3f8"
-MUTED = "#8f909d"
-PURPLE = "#9b6cff"
-GREEN = "#3be2a0"
-YELLOW = "#f3c969"
-RED = "#ff6e78"
+from stock_video_generator import __version__
+
+BACKGROUND = "#081017"
+SURFACE = "#0e1922"
+SURFACE_RAISED = "#12232d"
+LINE = "#213744"
+TEXT = "#f3f8f6"
+MUTED = "#7f98a2"
+PURPLE = "#a875ff"
+GREEN = "#2ee6a6"
+YELLOW = "#f1c66d"
+RED = "#ff7180"
 
 UI_FONT = "Microsoft YaHei UI"
 ICON_FONT = "Segoe Fluent Icons"
@@ -36,6 +41,79 @@ ERROR_ALREADY_EXISTS = 183
 SINGLE_INSTANCE_PREFIX = "Local\\StockVideoGenerator.Launcher"
 UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 UPDATE_PROGRESS_POLL_MS = 140
+RELEASE_REPO_URL = "https://github.com/YIDASHI007/stock-video-generator-releases"
+RELEASES_URL = f"{RELEASE_REPO_URL}/releases"
+
+
+@dataclass(slots=True)
+class UpdateCheckResult:
+    manager: Any | None
+    update: Any | None
+    current_version: str
+    mode: str
+    latest_version: str | None = None
+    detail: str = ""
+
+
+def _is_development_runtime(runtime_dir: Path) -> bool:
+    return not getattr(sys, "frozen", False) and (runtime_dir / ".git").is_dir()
+
+
+def _runtime_mode(runtime_dir: Path) -> str:
+    return "development" if _is_development_runtime(runtime_dir) else "installed"
+
+
+def _release_api_url(repo_url: str) -> str | None:
+    parsed = urllib.parse.urlparse(repo_url)
+    if parsed.hostname not in {"github.com", "www.github.com"}:
+        return None
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[:2]
+    return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+
+def _latest_release_version(repo_url: str, timeout: float = 6) -> str | None:
+    api_url = _release_api_url(repo_url)
+    if api_url is None:
+        return None
+    try:
+        payload = _http_json(api_url, timeout=timeout)
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    tag = payload.get("tag_name")
+    return str(tag).lstrip("v") if tag else None
+
+
+def _format_update_summary(result: UpdateCheckResult) -> str:
+    current = result.current_version.lstrip("v") or __version__
+    if result.update is not None:
+        target = str(result.update.TargetFullRelease.Version).lstrip("v")
+        return f"发现新版本 v{target}"
+    if result.mode == "development":
+        if result.latest_version:
+            return f"开发版 v{current} · 正式版 v{result.latest_version}"
+        return f"开发版 v{current} · 正式版状态未知"
+    if result.mode == "portable":
+        return f"便携版 v{current} · 不支持自动更新"
+    if result.mode == "unconfigured":
+        return f"v{current} · 未配置更新源"
+    return f"已是最新 v{current}"
+
+
+def _open_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    webbrowser.open(path.resolve().as_uri())
+
+
+def _workbench_url(port: int) -> str:
+    return f"http://127.0.0.1:{port}/?desktop=v{__version__}"
 
 
 def _asset_path(name: str) -> Path:
@@ -203,7 +281,9 @@ def _listener_owner(port: int) -> psutil.Process | None:
     return None
 
 
-def _is_expected_server(process: psutil.Process | None) -> bool:
+def _is_expected_server(
+    process: psutil.Process | None, runtime_dir: Path | None = None
+) -> bool:
     if process is None:
         return False
     try:
@@ -216,6 +296,12 @@ def _is_expected_server(process: psutil.Process | None) -> bool:
     expected = Path(sys.executable).resolve()
     if executable == expected:
         return True
+    if runtime_dir is not None and "stock_video_generator.desktop" in arguments:
+        try:
+            if Path(process.cwd()).resolve() == runtime_dir.resolve():
+                return True
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            pass
     if sys.platform != "win32" or executable.name.lower() != "stockvideogenerator.exe":
         return False
     local_app_data = os.environ.get("LOCALAPPDATA")
@@ -372,31 +458,56 @@ class FluentPlayMark(Canvas):
 
 
 class StepProgress(Canvas):
-    def __init__(self, parent: Any, count: int = 5) -> None:
+    LABELS = ("服务", "端口", "数据", "媒体", "更新")
+
+    def __init__(self, parent: Any) -> None:
         super().__init__(
             parent,
-            width=94,
-            height=14,
+            width=442,
+            height=52,
             background=BACKGROUND,
             highlightthickness=0,
             bd=0,
         )
-        self.count = count
         self.set_step(0)
 
-    def set_step(self, completed: int) -> None:
+    def set_step(self, active: int, *, failed: bool = False) -> None:
         self.delete("all")
-        for index in range(self.count):
-            x = 7 + index * 20
-            color = PURPLE if index < completed else "#333541"
-            self.create_oval(x - 3, 4, x + 3, 10, fill=color, outline="")
+        points = [23 + index * 99 for index in range(len(self.LABELS))]
+        for index in range(len(points) - 1):
+            color = GREEN if index < active else LINE
+            self.create_line(points[index], 15, points[index + 1], 15, fill=color, width=2)
+        for index, (x, label) in enumerate(zip(points, self.LABELS, strict=True)):
+            if index < active:
+                color = GREEN
+            elif index == active and active < len(self.LABELS):
+                color = RED if failed else PURPLE
+            else:
+                color = LINE
+            radius = 6 if index == active and active < len(self.LABELS) else 4
+            self.create_oval(
+                x - radius,
+                15 - radius,
+                x + radius,
+                15 + radius,
+                fill=color,
+                outline=BACKGROUND,
+                width=2,
+            )
+            self.create_text(
+                x,
+                39,
+                text=label,
+                fill=TEXT if index == active else MUTED,
+                font=(UI_FONT, 8, "bold" if index == active else "normal"),
+            )
 
 
 class DownloadProgress(Canvas):
     def __init__(self, parent: Any) -> None:
         super().__init__(
             parent,
-            width=302,
+            width=402,
             height=8,
             background=SURFACE,
             highlightthickness=0,
@@ -406,7 +517,7 @@ class DownloadProgress(Canvas):
 
     def set_value(self, value: float) -> None:
         self.delete("all")
-        width = 302
+        width = 402
         height = 6
         progress = max(0.0, min(100.0, float(value)))
         self.create_rectangle(0, 1, width, height + 1, fill="#2b2d39", outline="")
@@ -423,9 +534,11 @@ class LauncherWindow:
         self.log_dir = log_dir
         self.port = port
         self.base_url = f"http://127.0.0.1:{port}"
+        self.workbench_url = _workbench_url(port)
         self.server_process: subprocess.Popen[bytes] | None = None
         self.update_manager: Any | None = None
         self.update_info: Any | None = None
+        self.update_status: UpdateCheckResult | None = None
         self.tray_icon: Any | None = None
         self.update_download_process: subprocess.Popen[bytes] | None = None
         self.update_progress_path = self.log_dir / "launcher-update-progress.json"
@@ -436,13 +549,17 @@ class LauncherWindow:
         self._periodic_update_timer: str | None = None
         self._workbench_opened = False
         self._update_busy = False
+        self._service_restart_busy = False
         self._exiting = False
         self._motion_enabled = _client_animations_enabled()
         self._blocking_errors: list[str] = []
         self._snapshot: dict[str, Any] = {}
+        self._auto_open_after_checks = True
+        self._drag_origin = (0, 0)
+        self.mode = _runtime_mode(runtime_dir)
 
         self.root = Tk()
-        self.root.title("工作台启动中心")
+        self.root.title(f"股票视频工作台 · v{__version__}")
         self.window_icon = PhotoImage(file=str(_asset_path("launch-center-icon.png")))
         self.root.iconphoto(True, self.window_icon)
         self.root.configure(background=LINE)
@@ -451,56 +568,206 @@ class LauncherWindow:
         self.root.bind("<Escape>", self._handle_escape)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
 
-        width, height = 420, 300
+        width, height = 520, 360
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
         self.status_text = StringVar(value="正在检查服务状态")
+        self.status_detail_text = StringVar(value=f"本地服务 · 端口 {self.port}")
         self._build_ui()
         if auto_start:
             self.root.after(120, self._start_sequence)
 
     def _build_ui(self) -> None:
-        shell = Frame(self.root, background=LINE, width=420, height=300)
+        shell = Frame(self.root, background=LINE, width=520, height=360)
         shell.pack(fill="both", expand=True)
         shell.pack_propagate(False)
-        stage = Frame(shell, background=BACKGROUND, width=418, height=298)
+        stage = Frame(shell, background=BACKGROUND, width=518, height=358)
         stage.place(x=1, y=1)
         stage.pack_propagate(False)
 
+        title_bar = Frame(stage, background=BACKGROUND, width=518, height=78)
+        title_bar.place(x=0, y=0)
+        title_bar.pack_propagate(False)
+        title_bar.bind("<ButtonPress-1>", self._begin_drag)
+        title_bar.bind("<B1-Motion>", self._drag_window)
+
+        self.brand_icon = PhotoImage(file=str(_asset_path("launch-center-icon.png"))).subsample(
+            10, 10
+        )
         Label(
-            stage,
+            title_bar,
+            image=self.brand_icon,
+            background=BACKGROUND,
+            bd=0,
+        ).place(x=24, y=13)
+        Label(
+            title_bar,
             text="股票视频工作台",
+            foreground=TEXT,
+            background=BACKGROUND,
+            font=(UI_FONT, 14, "bold"),
+        ).place(x=86, y=16)
+        Label(
+            title_bar,
+            text="LOCAL PRODUCTION CONTROL",
             foreground=MUTED,
             background=BACKGROUND,
-            font=(UI_FONT, 9),
-        ).place(relx=0.5, y=23, anchor="n")
+            font=("Consolas", 8),
+        ).place(x=87, y=45)
 
-        self.play_mark = FluentPlayMark(stage)
-        self.play_mark.place(relx=0.5, y=56, anchor="n")
+        badge = Frame(
+            title_bar,
+            background=SURFACE_RAISED,
+            width=126,
+            height=28,
+            highlightbackground=LINE,
+            highlightthickness=1,
+        )
+        badge.place(x=344, y=20)
+        badge.pack_propagate(False)
+        mode_label = "DEV" if self.mode == "development" else "DESKTOP"
+        Label(
+            badge,
+            text=f"{mode_label}  ·  v{__version__}",
+            foreground=PURPLE if self.mode == "development" else GREEN,
+            background=SURFACE_RAISED,
+            font=("Consolas", 9, "bold"),
+        ).place(relx=0.5, rely=0.5, anchor="center")
+        Button(
+            title_bar,
+            text="×",
+            command=self._handle_window_close,
+            background=BACKGROUND,
+            activebackground=SURFACE_RAISED,
+            foreground=MUTED,
+            activeforeground=TEXT,
+            font=("Segoe UI", 15),
+            relief="flat",
+            bd=0,
+            width=2,
+            cursor="hand2",
+            highlightthickness=0,
+        ).place(x=478, y=12)
+        Frame(stage, background=LINE, width=518, height=1).place(x=0, y=77)
+
+        Label(
+            stage,
+            text="启动检查",
+            foreground=TEXT,
+            background=BACKGROUND,
+            font=(UI_FONT, 10, "bold"),
+        ).place(x=38, y=91)
+        Label(
+            stage,
+            text="依次确认服务与生产环境",
+            foreground=MUTED,
+            background=BACKGROUND,
+            font=(UI_FONT, 8),
+        ).place(x=112, y=93)
+
+        self.step_progress = StepProgress(stage)
+        self.step_progress.place(x=38, y=113)
 
         self.status_row = Frame(
             stage,
             background=SURFACE,
-            width=310,
-            height=46,
+            width=452,
+            height=70,
             highlightbackground=LINE,
             highlightthickness=1,
         )
-        self.status_y = 184
+        self.status_y = 174
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
         self.status_row.pack_propagate(False)
 
         self.status_content = Frame(self.status_row, background=SURFACE)
-        self.status_content.place(relx=0.5, rely=0.5, anchor="center")
-        self.status_label = StatusText(self.status_content, self.status_text)
-        self.status_label.pack(side="left")
-        self.status_indicator = BootIndicator(self.status_content)
-        self.status_indicator.pack(side="left", padx=(8, 0))
+        self.status_content.place(x=18, rely=0.5, anchor="w")
+        self.status_indicator = BootIndicator(self.status_content, size=32)
+        self.status_indicator.pack(side="left", padx=(0, 12))
+        status_copy = Frame(self.status_content, background=SURFACE)
+        status_copy.pack(side="left")
+        self.status_label = StatusText(status_copy, self.status_text)
+        self.status_label.configure(font=(UI_FONT, 10, "bold"), anchor="w")
+        self.status_label.pack(anchor="w")
+        Label(
+            status_copy,
+            textvariable=self.status_detail_text,
+            foreground=MUTED,
+            background=SURFACE,
+            font=(UI_FONT, 8),
+            anchor="w",
+        ).pack(anchor="w", pady=(5, 0))
 
-        self.step_progress = StepProgress(stage)
-        self.step_progress.place(relx=0.5, y=250, anchor="n")
+        self.endpoint_text = StringVar(value=f"LOCALHOST  ·  {self.port}")
+        Label(
+            stage,
+            textvariable=self.endpoint_text,
+            foreground=MUTED,
+            background=BACKGROUND,
+            font=("Consolas", 8),
+        ).place(x=38, y=258)
+        Label(
+            stage,
+            text="关闭窗口后继续在系统托盘运行",
+            foreground=MUTED,
+            background=BACKGROUND,
+            font=(UI_FONT, 8),
+        ).place(x=480, y=258, anchor="ne")
+
+        self.ready_actions = Frame(stage, background=BACKGROUND)
+        self.open_workbench_button = Button(
+            self.ready_actions,
+            text="打开工作台  →",
+            command=self._open_workbench_from_center,
+            background=GREEN,
+            activebackground="#5bf0b9",
+            foreground=BACKGROUND,
+            activeforeground=BACKGROUND,
+            font=(UI_FONT, 9, "bold"),
+            relief="flat",
+            bd=0,
+            padx=20,
+            pady=7,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.open_workbench_button.pack(side="left")
+        self.recheck_button = Button(
+            self.ready_actions,
+            text="重新检查",
+            command=lambda: self._start_sequence(auto_open=False),
+            background=SURFACE_RAISED,
+            activebackground=LINE,
+            foreground=TEXT,
+            activeforeground=TEXT,
+            font=(UI_FONT, 9),
+            relief="flat",
+            bd=0,
+            padx=16,
+            pady=7,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.recheck_button.pack(side="left", padx=(10, 0))
+        self.open_logs_button = Button(
+            self.ready_actions,
+            text="查看日志",
+            command=self._open_logs,
+            background=BACKGROUND,
+            activebackground=BACKGROUND,
+            foreground=MUTED,
+            activeforeground=TEXT,
+            font=(UI_FONT, 9),
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=7,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.open_logs_button.pack(side="left", padx=(4, 0))
 
         self.update_actions = Frame(stage, background=BACKGROUND)
         self.update_button = Button(
@@ -509,8 +776,8 @@ class LauncherWindow:
             command=self._install_update,
             background=PURPLE,
             activebackground="#ad8aff",
-            foreground="#0b0c12",
-            activeforeground="#0b0c12",
+            foreground=BACKGROUND,
+            activeforeground=BACKGROUND,
             font=(UI_FONT, 9),
             relief="flat",
             bd=0,
@@ -541,8 +808,8 @@ class LauncherWindow:
         self.download_panel = Frame(
             stage,
             background=SURFACE,
-            width=350,
-            height=110,
+            width=452,
+            height=118,
             highlightbackground=LINE,
             highlightthickness=1,
         )
@@ -564,7 +831,7 @@ class LauncherWindow:
             foreground=PURPLE,
             background=SURFACE,
             font=(UI_FONT, 9, "bold"),
-        ).place(x=331, y=13, anchor="ne")
+        ).place(x=431, y=13, anchor="ne")
         self.download_progress = DownloadProgress(self.download_panel)
         self.download_progress.place(x=18, y=39)
         Label(
@@ -580,7 +847,7 @@ class LauncherWindow:
             foreground=MUTED,
             background=SURFACE,
             font=(UI_FONT, 8),
-        ).place(x=331, y=55, anchor="ne")
+        ).place(x=431, y=55, anchor="ne")
         self.cancel_download_button = Button(
             self.download_panel,
             text="取消下载",
@@ -597,7 +864,51 @@ class LauncherWindow:
             cursor="hand2",
             highlightthickness=0,
         )
-        self.cancel_download_button.place(x=331, y=78, anchor="ne")
+        self.cancel_download_button.place(x=431, y=82, anchor="ne")
+
+    def _begin_drag(self, event: Any) -> None:
+        self._drag_origin = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+    def _drag_window(self, event: Any) -> None:
+        offset_x, offset_y = self._drag_origin
+        self.root.geometry(f"+{event.x_root - offset_x}+{event.y_root - offset_y}")
+
+    def _open_logs(self) -> None:
+        _open_directory(self.log_dir)
+
+    def _open_data(self) -> None:
+        configured = os.environ.get("APP_DATA_DIR")
+        _open_directory(Path(configured) if configured else self.runtime_dir / "data")
+
+    def _open_outputs(self) -> None:
+        configured = os.environ.get("APP_DATA_DIR")
+        data_dir = Path(configured) if configured else self.runtime_dir / "data"
+        _open_directory(data_dir / "outputs")
+
+    def _open_workbench_from_center(self) -> None:
+        self._open_workbench()
+
+    def _hide_action_panels(self) -> None:
+        self.ready_actions.place_forget()
+        self.update_actions.place_forget()
+        self.download_panel.place_forget()
+
+    def _show_ready_actions(self, *, service_available: bool = True) -> None:
+        self._hide_action_panels()
+        self.open_workbench_button.configure(
+            state="normal" if service_available else "disabled",
+            background=GREEN if service_available else LINE,
+        )
+        self.ready_actions.place(relx=0.5, y=302, anchor="n")
+
+    def _show_launch_center(self) -> None:
+        if self._exiting:
+            return
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(250, lambda: self.root.attributes("-topmost", False))
+        self._start_sequence(auto_open=False)
 
     def _background(self, work: Callable[[], Any], done: Callable[[Any], None]) -> None:
         def runner() -> None:
@@ -622,7 +933,7 @@ class LauncherWindow:
     def _ensure_service(self) -> dict[str, Any]:
         ready = self._read_ready()
         owner = _listener_owner(self.port)
-        expected = _is_expected_server(owner)
+        expected = _is_expected_server(owner, self.runtime_dir)
         if ready:
             return {"ready": ready, "owner": owner, "expected": expected}
         if owner is not None and not expected:
@@ -640,7 +951,11 @@ class LauncherWindow:
         started = _wait_for_server(self.server_process, self.port)
         ready = self._read_ready() if started else None
         owner = _listener_owner(self.port)
-        return {"ready": ready, "owner": owner, "expected": _is_expected_server(owner)}
+        return {
+            "ready": ready,
+            "owner": owner,
+            "expected": _is_expected_server(owner, self.runtime_dir),
+        }
 
     def _provider_health(self) -> list[Any] | None:
         if not self._snapshot.get("ready"):
@@ -654,23 +969,63 @@ class LauncherWindow:
         payload = _http_json(f"{self.base_url}/health", timeout=8)
         return payload if isinstance(payload, dict) else None
 
-    def _check_update(self) -> tuple[Any, Any | None, str]:
-        from velopack import GithubSource, UpdateManager
-
+    def _check_update(self) -> UpdateCheckResult:
         from stock_video_generator.desktop import _update_repo_url
 
-        repo_url = _update_repo_url(self.runtime_dir)
-        if not repo_url:
-            return None, None, "当前为开发模式"
-        manager = UpdateManager(GithubSource(repo_url))
-        if manager.get_is_portable():
-            return manager, None, "当前为开发模式"
-        update = manager.check_for_updates()
-        return manager, update, manager.get_current_version()
+        repo_url = _update_repo_url(self.runtime_dir) or RELEASE_REPO_URL
+        if self.mode == "development":
+            latest = _latest_release_version(repo_url)
+            return UpdateCheckResult(
+                manager=None,
+                update=None,
+                current_version=__version__,
+                mode="development",
+                latest_version=latest,
+                detail="开发版通过 Git 同步源码，不安装桌面更新包",
+            )
+        configured_repo = _update_repo_url(self.runtime_dir)
+        if not configured_repo:
+            return UpdateCheckResult(
+                manager=None,
+                update=None,
+                current_version=__version__,
+                mode="unconfigured",
+                detail="当前运行目录没有配置 GitHub Release 更新源",
+            )
 
-    def _start_sequence(self) -> None:
+        from velopack import GithubSource, UpdateManager
+
+        manager = UpdateManager(GithubSource(configured_repo))
+        current = str(manager.get_current_version() or __version__).lstrip("v")
+        if manager.get_is_portable():
+            return UpdateCheckResult(
+                manager=manager,
+                update=None,
+                current_version=current,
+                mode="portable",
+                detail="便携运行模式不会修改本机安装目录",
+            )
+        update = manager.check_for_updates()
+        latest = (
+            str(update.TargetFullRelease.Version).lstrip("v") if update is not None else current
+        )
+        return UpdateCheckResult(
+            manager=manager,
+            update=update,
+            current_version=current,
+            mode="installed",
+            latest_version=latest,
+            detail="桌面安装版通过 GitHub Release 接收更新",
+        )
+
+    def _start_sequence(self, *, auto_open: bool = True) -> None:
+        self._auto_open_after_checks = auto_open
         self._blocking_errors.clear()
         self._snapshot = {"ready": None, "owner": None, "expected": False}
+        self._hide_action_panels()
+        self.step_progress.place(x=38, y=113)
+        self.step_progress.set_step(0)
+        self.status_detail_text.set(f"本地服务 · 端口 {self.port}")
         self._run_step(0)
 
     def _run_step(self, index: int) -> None:
@@ -686,6 +1041,14 @@ class LauncherWindow:
             return
         text, work = steps[index]
         self.step_progress.set_step(index)
+        details = (
+            f"正在连接 {self.base_url}",
+            f"检查本机 TCP {self.port} 监听状态",
+            "验证行情数据提供方是否可用",
+            "确认 Node、Remotion 与 FFmpeg",
+            f"核对当前 v{__version__} 与发布版本",
+        )
+        self.status_detail_text.set(details[index])
         self._show_loading(text)
         self._background(work, lambda result: self._handle_result(index, result))
 
@@ -706,18 +1069,27 @@ class LauncherWindow:
                 self._snapshot.update(value)
                 if value.get("ready"):
                     message = "服务状态正常"
+                    version = value["ready"].get("version") or __version__
+                    owner = value.get("owner")
+                    owner_text = f" · PID {owner.pid}" if owner is not None else ""
+                    self.status_detail_text.set(f"后台 v{version}{owner_text} · 端口 {self.port}")
                 elif value.get("owner") and not value.get("expected"):
                     state = "error"
                     message = "服务端口被其他程序占用"
                     blocking_error = message
+                    self.status_detail_text.set(
+                        f"PID {value['owner'].pid} 正在监听 {self.port}，未自动终止"
+                    )
                 else:
                     state = "error"
                     message = "服务启动失败"
                     blocking_error = message
+                    self.status_detail_text.set("后台没有通过 /ready 检查，请查看启动日志")
             else:
                 state = "error"
                 message = "服务启动失败"
                 blocking_error = message
+                self.status_detail_text.set("启动进程返回异常，请查看启动日志")
         elif index == 1:
             owner = self._snapshot.get("owner")
             expected = self._snapshot.get("expected")
@@ -727,6 +1099,7 @@ class LauncherWindow:
                 blocking_error = message
             else:
                 message = "端口可用"
+                self.status_detail_text.set(f"127.0.0.1:{self.port} 已由工作台服务监听")
         elif index == 2:
             providers = value if ok and isinstance(value, list) else []
             provider_ok = any(
@@ -734,6 +1107,10 @@ class LauncherWindow:
             )
             if provider_ok:
                 message = "数据接口正常"
+                available_count = sum(
+                    1 for item in providers if isinstance(item, dict) and item.get("available")
+                )
+                self.status_detail_text.set(f"{available_count} 个行情数据源可以响应")
             elif self._snapshot.get("ready"):
                 state = "error"
                 message = "数据接口不可用"
@@ -751,6 +1128,7 @@ class LauncherWindow:
             }
             if required.issubset(available):
                 message = "媒体组件正常"
+                self.status_detail_text.set("Node · Remotion · FFmpeg 均已就绪")
             elif self._snapshot.get("ready"):
                 state = "error"
                 message = "媒体组件不完整"
@@ -762,17 +1140,20 @@ class LauncherWindow:
             if not ok:
                 state = "warning"
                 message = "暂时无法检查更新"
+                self.status_detail_text.set("网络或 GitHub 更新源暂时没有响应")
             else:
-                manager, update, current = value
-                self.update_manager = manager
-                self.update_info = update
-                if update is None:
-                    message = "版本状态正常" if "开发" not in str(current) else "当前为开发模式"
-                else:
-                    message = f"发现新版本 v{update.TargetFullRelease.Version}"
+                self.update_status = value
+                self.update_manager = value.manager
+                self.update_info = value.update
+                message = _format_update_summary(value)
+                self.status_detail_text.set(value.detail)
 
         if blocking_error and blocking_error not in self._blocking_errors:
             self._blocking_errors.append(blocking_error)
+        if state == "error":
+            self.step_progress.set_step(index, failed=True)
+        else:
+            self.step_progress.set_step(index + 1)
         self.root.after(
             220,
             lambda: self._complete_step(
@@ -805,21 +1186,29 @@ class LauncherWindow:
 
     def _finish_sequence(self) -> None:
         if self._blocking_errors:
-            self.status_text.set(f"{self._blocking_errors[0]} · 点击关闭")
+            self.status_text.set(self._blocking_errors[0])
             self.status_label.set_color(RED)
             self.status_indicator.set_result("error")
             self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
-            self.root.bind("<Button-1>", lambda _event: self._exit_app())
+            self._show_ready_actions(service_available=False)
             return
         self.step_progress.set_step(5)
         if self.update_manager is not None and self.update_info is not None:
             self._show_update_prompt()
             return
-        self.status_text.set("检查完成，正在打开")
+        self.status_text.set(
+            _format_update_summary(self.update_status)
+            if self.update_status is not None
+            else "本机环境已就绪"
+        )
+        self.status_detail_text.set(f"工作台 v{__version__} · 本地服务运行正常")
         self.status_label.set_color(GREEN)
         self.status_indicator.set_result("ok")
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
-        self.root.after(480, self._open_workbench)
+        if self._auto_open_after_checks:
+            self.root.after(650, self._open_workbench)
+        else:
+            self._show_ready_actions()
 
     def _show_update_prompt(
         self, *, failed: bool = False, cancelled: bool = False
@@ -832,6 +1221,7 @@ class LauncherWindow:
         else:
             message = f"发现新版本 v{version}"
         self.status_text.set(message)
+        self.status_detail_text.set(f"当前 v{__version__} · 可升级到 v{version}")
         self.status_label.set_color(RED if failed else PURPLE)
         self.status_indicator.set_result("error" if failed else "warning")
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
@@ -848,7 +1238,7 @@ class LauncherWindow:
             state="normal",
         )
         self.later_button.configure(state="normal")
-        self.update_actions.place(relx=0.5, y=246, anchor="n")
+        self.update_actions.place(relx=0.5, y=302, anchor="n")
         self.cancel_download_button.configure(text="取消下载", state="normal")
         self._update_busy = False
 
@@ -877,8 +1267,8 @@ class LauncherWindow:
         self.download_rate_text.set("")
         self.download_progress.set_value(0)
         self.cancel_download_button.configure(text="取消下载", state="normal")
-        self.cancel_download_button.place(x=331, y=78, anchor="ne")
-        self.download_panel.place(relx=0.5, y=168, anchor="n")
+        self.cancel_download_button.place(x=431, y=82, anchor="ne")
+        self.download_panel.place(relx=0.5, y=174, anchor="n")
         self._start_update_download_process(version)
 
     def _start_update_download_process(self, version: Any) -> None:
@@ -1062,15 +1452,25 @@ class LauncherWindow:
             with Image.open(_asset_path("launch-center-icon.png")) as source:
                 tray_image = source.convert("RGBA").copy()
             menu = Menu(
-                MenuItem("打开工作台", self._tray_open, default=True),
-                MenuItem("检查更新", self._tray_check_update),
+                MenuItem(self._tray_version_text, None, enabled=False),
+                MenuItem(self._tray_service_text, None, enabled=False),
                 Menu.SEPARATOR,
-                MenuItem("退出", self._tray_exit),
+                MenuItem("打开工作台", self._tray_open, default=True),
+                MenuItem("显示启动中心", self._tray_show_center),
+                MenuItem("重启后台服务", self._tray_restart_service),
+                MenuItem("检查版本更新", self._tray_check_update),
+                Menu.SEPARATOR,
+                MenuItem("打开输出目录", self._tray_open_outputs),
+                MenuItem("打开数据目录", self._tray_open_data),
+                MenuItem("打开日志目录", self._tray_open_logs),
+                MenuItem("查看发布说明", self._tray_release_notes),
+                Menu.SEPARATOR,
+                MenuItem("退出工作台", self._tray_exit),
             )
             self.tray_icon = Icon(
                 "stock-video-workbench",
                 tray_image,
-                f"股票视频工作台 · 端口 {self.port}",
+                f"股票视频工作台 v{__version__} · 端口 {self.port}",
                 menu,
             )
             self.tray_icon.run_detached()
@@ -1085,6 +1485,25 @@ class LauncherWindow:
                 pass
             return False
 
+    def _tray_version_text(self, _item: Any = None) -> str:
+        mode = "开发版" if self.mode == "development" else "桌面版"
+        return f"股票视频工作台 v{__version__} · {mode}"
+
+    def _tray_service_text(self, _item: Any = None) -> str:
+        if self._service_restart_busy:
+            return f"◌ 后台服务正在重启 · {self.port}"
+        if self._snapshot.get("ready"):
+            return f"● 后台服务正常 · {self.port}"
+        return f"○ 后台服务未就绪 · {self.port}"
+
+    def _refresh_tray_menu(self) -> None:
+        if self.tray_icon is None:
+            return
+        try:
+            self.tray_icon.update_menu()
+        except Exception:
+            pass
+
     def _notify_tray(self, message: str) -> None:
         if self.tray_icon is None:
             return
@@ -1095,7 +1514,49 @@ class LauncherWindow:
 
     def _tray_open(self, _icon: Any = None, _item: Any = None) -> None:
         self._workbench_opened = True
-        webbrowser.open(self.base_url)
+        webbrowser.open(self.workbench_url, new=2)
+
+    def _tray_show_center(self, _icon: Any = None, _item: Any = None) -> None:
+        self.root.after(0, self._show_launch_center)
+
+    def _tray_open_outputs(self, _icon: Any = None, _item: Any = None) -> None:
+        self.root.after(0, self._open_outputs)
+
+    def _tray_open_data(self, _icon: Any = None, _item: Any = None) -> None:
+        self.root.after(0, self._open_data)
+
+    def _tray_open_logs(self, _icon: Any = None, _item: Any = None) -> None:
+        self.root.after(0, self._open_logs)
+
+    def _tray_release_notes(self, _icon: Any = None, _item: Any = None) -> None:
+        webbrowser.open(RELEASES_URL)
+
+    def _tray_restart_service(self, _icon: Any = None, _item: Any = None) -> None:
+        if self._exiting or self._service_restart_busy:
+            self._notify_tray("后台服务正在重启")
+            return
+        self._service_restart_busy = True
+        self._refresh_tray_menu()
+        self._notify_tray("正在重启后台服务")
+        self._background(self._restart_service, self._handle_service_restart_result)
+
+    def _restart_service(self) -> dict[str, Any]:
+        self._stop_service()
+        self.server_process = None
+        return self._ensure_service()
+
+    def _handle_service_restart_result(self, result: tuple[bool, Any]) -> None:
+        if self._exiting:
+            return
+        ok, value = result
+        self._service_restart_busy = False
+        if ok and isinstance(value, dict):
+            self._snapshot.update(value)
+        ready = bool(ok and isinstance(value, dict) and value.get("ready"))
+        self._notify_tray(
+            "后台服务已重新启动" if ready else "后台服务重启失败，请查看日志"
+        )
+        self._refresh_tray_menu()
 
     def _tray_check_update(self, _icon: Any = None, _item: Any = None) -> None:
         if self._exiting or self._update_busy:
@@ -1113,18 +1574,19 @@ class LauncherWindow:
         if not ok:
             self._notify_tray("暂时无法检查更新，请稍后重试")
             return
-        manager, update, current = value
-        self.update_manager = manager
-        self.update_info = update
-        if update is None:
-            message = "当前为开发模式" if "开发" in str(current) else "当前已是最新版本"
-            self._notify_tray(message)
+        self.update_status = value
+        self.update_manager = value.manager
+        self.update_info = value.update
+        self._refresh_tray_menu()
+        if value.update is None:
+            self._notify_tray(_format_update_summary(value))
             return
-        version = update.TargetFullRelease.Version
+        version = value.update.TargetFullRelease.Version
         self._notify_tray(f"发现新版本 v{version}")
         self.root.deiconify()
         self.root.lift()
         self.root.attributes("-topmost", True)
+        self.root.after(250, lambda: self.root.attributes("-topmost", False))
         self._show_update_prompt()
 
     def _schedule_periodic_update_check(
@@ -1159,17 +1621,19 @@ class LauncherWindow:
         if not ok:
             self._schedule_periodic_update_check()
             return
-        manager, update, _current = value
-        self.update_manager = manager
-        self.update_info = update
-        if update is None:
+        self.update_status = value
+        self.update_manager = value.manager
+        self.update_info = value.update
+        self._refresh_tray_menu()
+        if value.update is None:
             self._schedule_periodic_update_check()
             return
-        version = update.TargetFullRelease.Version
+        version = value.update.TargetFullRelease.Version
         self._notify_tray(f"发现新版本 v{version}，可立即下载更新")
         self.root.deiconify()
         self.root.lift()
         self.root.attributes("-topmost", True)
+        self.root.after(250, lambda: self.root.attributes("-topmost", False))
         self._show_update_prompt()
 
     def _tray_exit(self, _icon: Any = None, _item: Any = None) -> None:
@@ -1197,7 +1661,7 @@ class LauncherWindow:
                 process.kill()
             return
         owner = _listener_owner(self.port)
-        if not _is_expected_server(owner):
+        if not _is_expected_server(owner, self.runtime_dir):
             return
         owner.terminate()
         try:
@@ -1240,15 +1704,17 @@ class LauncherWindow:
 
     def _open_workbench(self) -> None:
         if not self._ensure_tray():
-            webbrowser.open(self.base_url)
-            self.status_text.set("系统托盘启动失败 · 点击退出")
+            webbrowser.open(self.workbench_url, new=2)
+            self._workbench_opened = True
+            self.status_text.set("系统托盘启动失败")
+            self.status_detail_text.set("工作台已在浏览器打开；启动中心需保持运行")
             self.status_label.set_color(RED)
             self.status_indicator.set_result("error")
             self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
-            self.root.bind("<Button-1>", lambda _event: self._exit_app())
+            self._show_ready_actions()
             return
         if not self._workbench_opened:
-            webbrowser.open(self.base_url)
+            webbrowser.open(self.workbench_url, new=2)
             self._workbench_opened = True
         self._schedule_periodic_update_check()
         self.root.withdraw()
@@ -1261,7 +1727,7 @@ class LauncherWindow:
 def run_launcher_gui(runtime_dir: Path, log_dir: Path, port: int) -> int:
     instance_guard = _acquire_single_instance(port)
     if instance_guard is None:
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        webbrowser.open(_workbench_url(port), new=2)
         return 0
     try:
         return LauncherWindow(runtime_dir, log_dir, port).run()
