@@ -224,7 +224,7 @@ Write-Host "[6/6] Building the Velopack installer and delta package..."
     --packVersion $Version `
     --packDir $stageDir `
     --mainExe StockVideoGenerator.exe `
-    --packTitle "Stock Video Generator" `
+    --packTitle "股票视频启动中心" `
     --packAuthors "Stock Video Generator" `
     --icon $appIcon `
     --shortcuts "Desktop,StartMenuRoot" `
