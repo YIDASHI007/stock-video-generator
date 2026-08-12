@@ -513,3 +513,78 @@ export const packUrl = (params: {
 };
 
 export type {VisualizationSpec};
+
+/* ---------------- 抖音链接提取 ---------------- */
+
+export type DouyinIntegrationSettings = {
+  enabled: boolean;
+  base_url: string;
+  client_id: string;
+  connect_timeout_seconds: number;
+  job_timeout_seconds: number;
+  api_key_configured: boolean;
+  api_key_hint: string | null;
+};
+
+export type DouyinRemoteFile = {
+  name: string;
+  path: string;
+  size: number;
+  url: string;
+};
+
+export type DouyinRemoteJob = {
+  id: string;
+  job_id?: string;
+  url: string;
+  status: string;
+  stage: string;
+  progress: number;
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
+  files: DouyinRemoteFile[];
+  result?: {
+    aweme_id?: string;
+    title?: string;
+    author?: Record<string, unknown>;
+    description?: string;
+    detected_language?: string;
+    language_probability?: number;
+    duration?: number;
+    transcript?: string;
+    segments?: Array<{start: number; end: number; text: string}>;
+  };
+};
+
+export type DouyinJobSnapshot = {
+  local_job_id: string;
+  remote_job_id: string;
+  source_url?: string;
+  created_at: string;
+  imported_at: string | null;
+  import_dir: string | null;
+  remote: DouyinRemoteJob;
+};
+
+export type DouyinImportedAsset = {
+  source: "douyin";
+  source_url?: string;
+  source_id: string;
+  title?: string;
+  author?: {nickname?: string; unique_id?: string} | null;
+  description?: string;
+  language?: string;
+  duration?: number;
+  transcript?: string;
+  imported_at: string;
+  video_name?: string | null;
+};
+
+export const douyinFileUrl = (localJobId: string, remoteUrl: string): string => {
+  const token = remoteUrl.split("/").pop() ?? "";
+  return `${API_BASE}/api/integrations/douyin/jobs/${localJobId}/files/${token}`;
+};
+
+export const douyinImportedVideoUrl = (sourceId: string): string =>
+  `${API_BASE}/api/integrations/douyin/imports/${encodeURIComponent(sourceId)}/video`;

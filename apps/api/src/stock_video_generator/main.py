@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -42,6 +43,11 @@ from stock_video_generator.database import (
     RenderRecord,
     SimulationRecord,
     TopicRecord,
+)
+from stock_video_generator.douyin_integration import (
+    DouyinExtractRequest,
+    DouyinIntegration,
+    DouyinSettingsUpdate,
 )
 from stock_video_generator.errors import (
     PipelineConflictError,
@@ -139,6 +145,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     publish_manager = PublishManager(settings, database, publishing)
     publish_batches = PublishBatchService(database, publishing, publish_manager)
     publish_batch_manager = PublishBatchManager(database, publishing, publish_manager)
+    douyin_integration = DouyinIntegration(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -174,6 +181,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     app.state.publish_manager = publish_manager
     app.state.publish_batches = publish_batches
     app.state.publish_batch_manager = publish_batch_manager
+    app.state.douyin_integration = douyin_integration
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -323,6 +331,101 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     async def provider_health() -> list[dict[str, object]]:
         results = await market_data.health()
         return [result.model_dump(mode="json") for result in results]
+
+    @app.get("/api/integrations/douyin/settings")
+    async def douyin_settings() -> dict[str, object]:
+        return douyin_integration.public_settings()
+
+    @app.put("/api/integrations/douyin/settings")
+    async def update_douyin_settings(
+        request: DouyinSettingsUpdate,
+    ) -> dict[str, object]:
+        try:
+            return douyin_integration.save_settings(request)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/integrations/douyin/test")
+    async def test_douyin_integration() -> dict[str, object]:
+        try:
+            return await douyin_integration.test_connection()
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"提取服务连接失败：{exc}") from exc
+
+    @app.post("/api/integrations/douyin/jobs", status_code=status.HTTP_202_ACCEPTED)
+    async def create_douyin_job(request: DouyinExtractRequest) -> dict[str, object]:
+        try:
+            return await douyin_integration.create_job(request)
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"提交提取任务失败：{exc}") from exc
+
+    @app.get("/api/integrations/douyin/jobs/{local_job_id}")
+    async def get_douyin_job(local_job_id: str) -> dict[str, object]:
+        try:
+            return await douyin_integration.get_job(local_job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"读取提取任务失败：{exc}") from exc
+
+    @app.post("/api/integrations/douyin/jobs/{local_job_id}/cancel")
+    async def cancel_douyin_job(local_job_id: str) -> dict[str, object]:
+        try:
+            return await douyin_integration.cancel_job(local_job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"取消提取任务失败：{exc}") from exc
+
+    @app.get("/api/integrations/douyin/jobs/{local_job_id}/files/{token}")
+    @app.head("/api/integrations/douyin/jobs/{local_job_id}/files/{token}")
+    async def download_douyin_job_file(
+        local_job_id: str, token: str, request: Request
+    ) -> StreamingResponse:
+        try:
+            headers = await douyin_integration.file_headers(local_job_id, token)
+            stream = douyin_integration.stream_file(
+                local_job_id, token, request.headers.get("range")
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"下载文件失败：{exc}") from exc
+        response_headers = {
+            key.title(): value for key, value in headers.items() if key != "content-type"
+        }
+        response_headers["Cache-Control"] = "private, no-store"
+        return StreamingResponse(
+            stream,
+            media_type=headers.get("content-type", "application/octet-stream"),
+            headers=response_headers,
+        )
+
+    @app.post("/api/integrations/douyin/jobs/{local_job_id}/import")
+    async def import_douyin_job(local_job_id: str) -> dict[str, object]:
+        try:
+            return await douyin_integration.import_job(local_job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError, OSError) as exc:
+            raise HTTPException(status_code=503, detail=f"导入内容库失败：{exc}") from exc
+
+    @app.get("/api/integrations/douyin/imports")
+    async def list_douyin_imports() -> list[dict[str, object]]:
+        return douyin_integration.list_imports()
+
+    @app.get("/api/integrations/douyin/imports/{source_id}/video")
+    async def play_douyin_import(source_id: str) -> FileResponse:
+        try:
+            video = douyin_integration.imported_video(source_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(
+            video,
+            media_type="video/mp4",
+            filename=video.name,
+            content_disposition_type="inline",
+        )
 
     @app.get("/api/system/status")
     async def system_status() -> dict[str, object]:

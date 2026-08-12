@@ -128,6 +128,8 @@ class Settings(BaseSettings):
             self.data_dir / "outputs",
             self.data_dir / "publishes",
             self.data_dir / "publish-accounts",
+            self.data_dir / "integrations" / "douyin",
+            self.data_dir / "imports" / "douyin",
             self.log_dir / "jobs",
         ):
             path.mkdir(parents=True, exist_ok=True)
