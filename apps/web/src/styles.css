@@ -4756,3 +4756,84 @@ textarea {transition: color 160ms ease, background-color 160ms ease, border-colo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important;}
 }
+
+/* Remote Douyin ingest: the network path is the page's signature element. */
+.douyin-import-page {max-width: 1380px;}
+.douyin-import-hero {align-items: flex-end;}
+.remote-chain {display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);}
+.remote-chain span {display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 9px; font-weight: 650; white-space: nowrap;}
+.remote-chain i {width: 28px; height: 1px; background: var(--line-strong);}
+.remote-chain.online span {color: var(--success);}
+.remote-chain.online i {background: var(--success); box-shadow: 0 0 8px var(--success-dim);}
+.douyin-import-grid {display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .75fr); gap: 14px;}
+.douyin-source-card,
+.douyin-service-card,
+.douyin-job-card {padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);}
+.douyin-source-card textarea {width: 100%; resize: vertical; min-height: 148px; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-soft); color: var(--text); font: inherit; line-height: 1.7;}
+.douyin-submit-row {display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 12px;}
+.douyin-submit-row label,
+.douyin-service-card > label {display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 650;}
+.douyin-submit-row select {min-width: 150px;}
+.douyin-submit-row .button {min-width: 126px; justify-content: center;}
+.extract-output-strip {display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 15px;}
+.extract-output-strip span {display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; color: var(--faint); border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); font-size: 8.5px;}
+.douyin-service-card {display: flex; flex-direction: column; gap: 11px;}
+.douyin-service-card .ops-panel-head {margin-bottom: 2px;}
+.douyin-service-card input {width: 100%;}
+.douyin-service-card .checkbox-label {flex-direction: row; align-items: center;}
+.service-actions {display: flex; gap: 7px;}
+.service-actions .button {flex: 1; justify-content: center;}
+.service-state {display: flex; align-items: center; gap: 9px; padding: 10px; color: var(--faint); border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft);}
+.service-state.online {color: var(--success); border-color: color-mix(in srgb, var(--success) 28%, var(--line)); background: var(--success-dim);}
+.service-state span {display: flex; flex-direction: column; gap: 2px;}
+.service-state strong {font-size: 9.5px;}
+.service-state small {color: var(--faint); font-size: 8px;}
+.douyin-job-card {margin-top: 14px;}
+.douyin-job-head {display: flex; align-items: center; justify-content: space-between; gap: 12px;}
+.douyin-job-head > div {display: flex; align-items: center; gap: 9px;}
+.douyin-job-head > div > span:last-child {display: flex; flex-direction: column; gap: 2px;}
+.douyin-job-head strong {font-size: 11px;}
+.douyin-job-head small {color: var(--faint); font-size: 8.5px;}
+.douyin-job-head b {font: 700 13px/1 "Consolas", monospace; color: var(--green);}
+.job-status-dot {width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 5px var(--amber-dim);}
+.job-status-dot.completed {background: var(--success); box-shadow: 0 0 0 5px var(--success-dim);}
+.job-status-dot.failed,
+.job-status-dot.cancelled {background: var(--red); box-shadow: 0 0 0 5px var(--red-dim);}
+.douyin-progress {height: 5px; overflow: hidden; margin-top: 12px; border-radius: 999px; background: var(--surface-3);}
+.douyin-progress i {display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), var(--cyan)); transition: width 350ms ease;}
+.douyin-result-grid {display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .65fr); gap: 14px; margin-top: 17px; padding-top: 17px; border-top: 1px solid var(--line);}
+.transcript-panel header {display: flex; align-items: center; justify-content: space-between; gap: 12px;}
+.transcript-panel h2,
+.result-files h2 {margin: 2px 0 0; font-size: 13px;}
+.post-description {margin: 12px 0 0; padding: 10px; color: var(--muted); border-left: 2px solid var(--cyan); background: var(--cyan-dim); font-size: 9.5px; line-height: 1.55;}
+.transcript-copy {max-height: 310px; overflow: auto; margin-top: 10px; padding: 13px; color: var(--text); border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); font-size: 10.5px; line-height: 1.8; white-space: pre-wrap;}
+.result-files {display: flex; flex-direction: column; gap: 7px;}
+.result-files > a {display: grid; grid-template-columns: 18px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);}
+.result-files > a:hover {color: var(--green); border-color: color-mix(in srgb, var(--green) 32%, var(--line));}
+.result-files > a span {display: flex; min-width: 0; flex-direction: column; gap: 2px;}
+.result-files > a strong {overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap;}
+.result-files > a small {color: var(--faint); font-size: 8px;}
+.result-files .button {justify-content: center; margin-top: 4px;}
+.spin {animation: spin 900ms linear infinite;}
+@keyframes spin {to {transform: rotate(360deg);}}
+
+.external-assets-section {display:flex; flex-direction:column; gap:10px; margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--line);}
+.external-assets-head {display:flex; align-items:center; justify-content:space-between; gap:12px;}
+.external-assets-head h2 {margin:2px 0 0; font-size:14px;}
+.external-asset-card .asset-preview video {width:100%; height:100%; object-fit:cover;}
+.external-asset-card .source-badge {padding:3px 6px; color:#fff; border-radius:4px; background:#151515; font-size:8px;}
+.imported-meta-row {display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); color:var(--muted); font-size:9px;}
+.imported-meta-row strong {color:var(--text);}
+.imported-content-drawer textarea[readonly] {cursor:text;}
+
+@media (max-width: 980px) {
+  .douyin-import-grid,
+  .douyin-result-grid {grid-template-columns: 1fr;}
+  .remote-chain {display: none;}
+}
+@media (max-width: 620px) {
+  .extract-output-strip {grid-template-columns: 1fr 1fr;}
+  .douyin-submit-row {align-items: stretch; flex-direction: column;}
+  .douyin-submit-row label {width: 100%;}
+  .douyin-submit-row select {width: 100%;}
+}

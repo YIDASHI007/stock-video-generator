@@ -9,6 +9,7 @@ import {
   CircleUserRound,
   Clapperboard,
   Database,
+  DownloadCloud,
   FileClock,
   FileVideo2,
   Gauge,
@@ -391,6 +392,7 @@ const navGroups: NavGroup[] = [
     items: [
       {to: "/assets", label: "内容库", description: "成片与内容元数据", icon: FileVideo2},
       {to: "/assets/materials", label: "素材库", description: "封面、音乐与源文件", icon: HardDrive},
+      {to: "/assets/douyin", label: "链接提取", description: "视频、文案与精准字幕", icon: DownloadCloud},
     ],
   },
   {

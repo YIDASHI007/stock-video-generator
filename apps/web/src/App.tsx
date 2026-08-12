@@ -7,6 +7,7 @@ import {AccountsPage} from "./pages/AccountsPage";
 import {AnalyticsPage} from "./pages/AnalyticsPage";
 import {BackupsPage} from "./pages/BackupsPage";
 import {ContentLibraryPage} from "./pages/ContentLibraryPage";
+import {DouyinImportPage} from "./pages/DouyinImportPage";
 import {DashboardPage} from "./pages/DashboardPage";
 import {JobsPage} from "./pages/JobsPage";
 import {MaterialsPage} from "./pages/MaterialsPage";
@@ -31,6 +32,7 @@ export const App: React.FC = () => (
         <Route path="jobs" element={<JobsPage />} />
         <Route path="assets" element={<ContentLibraryPage />} />
         <Route path="assets/materials" element={<MaterialsPage />} />
+        <Route path="assets/douyin" element={<DouyinImportPage />} />
         <Route path="publish" element={<PublishPage />} />
         <Route path="publish/calendar" element={<PublishCalendarPage />} />
         <Route path="publish/records" element={<PublishRecordsPage />} />
