@@ -4,12 +4,14 @@ import json
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from stock_video_generator.config import Settings
 from stock_video_generator.douyin_integration import (
     DouyinExtractRequest,
     DouyinIntegration,
     DouyinSettingsUpdate,
 )
+from stock_video_generator.main import create_app
 
 
 def integration(tmp_path) -> DouyinIntegration:
@@ -58,6 +60,23 @@ def test_imported_video_is_safely_resolved(tmp_path) -> None:
     assert service.imported_video("7658216586767060264") == video
     with pytest.raises(KeyError):
         service.imported_video("../outside")
+
+
+def test_asset_spa_routes_take_priority_over_static_assets_mount(tmp_path) -> None:
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text('<div id="root"></div>', encoding="utf-8")
+    service_settings = Settings(
+        data_dir=tmp_path / "data",
+        log_dir=tmp_path / "logs",
+        web_dist_dir=web,
+    )
+
+    with TestClient(create_app(service_settings)) as client:
+        for route in ("/assets", "/assets/materials", "/assets/douyin"):
+            response = client.get(route)
+            assert response.status_code == 200
+            assert 'id="root"' in response.text
 
 
 @pytest.mark.asyncio

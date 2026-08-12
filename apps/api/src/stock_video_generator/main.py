@@ -1690,6 +1690,16 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
 
     web_dist_dir = settings.resolved_web_dist_dir
     if web_dist_dir.is_dir() and (web_dist_dir / "index.html").is_file():
+        @app.get("/assets", include_in_schema=False)
+        @app.get("/assets/materials", include_in_schema=False)
+        @app.get("/assets/douyin", include_in_schema=False)
+        async def web_asset_pages() -> FileResponse:
+            """Serve SPA pages before the Vite /assets static mount handles files."""
+            return FileResponse(
+                web_dist_dir / "index.html",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
+
         assets_dir = web_dist_dir / "assets"
         if assets_dir.is_dir():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="web-assets")
