@@ -68,6 +68,10 @@ jobs:
             -UpdateRepoUrl "https://github.com/${{ env.RELEASE_REPOSITORY }}"
 
       - name: Upload workflow artifact
+        # The public GitHub Release below is the update source of record. A full
+        # Actions artifact is only a redundant CI backup, so a temporary account
+        # storage-quota exhaustion must not block publishing the signed-off build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: StockVideoGenerator-${{ steps.version.outputs.value }}-windows
