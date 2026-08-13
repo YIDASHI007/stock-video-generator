@@ -23,6 +23,7 @@ import {
   ChevronIcon,
   EmptyState,
   ErrorNotice,
+  SuccessNotice,
   WarnIcon,
   elapsedText,
   isActiveStage,
@@ -390,7 +391,7 @@ export const WorkbenchPage: React.FC = () => {
       {jobsError ? <ErrorNotice message={jobsError} /> : null}
       {universeError ? <ErrorNotice message={universeError} /> : null}
       {formError ? <ErrorNotice message={formError} /> : null}
-      {notice ? <div className="notice ok-notice">{notice}</div> : null}
+      {notice ? <SuccessNotice message={notice}/> : null}
 
       {/* 1. Hero 控制台 */}
       <section className={`wb-hero ${enabled ? "live" : ""}`}>

@@ -14,7 +14,7 @@ import {
   type TopicDirective,
   type TopicPreviewResult,
 } from "../api";
-import {ErrorNotice} from "../components";
+import {ErrorNotice, SuccessNotice} from "../components";
 import {usePolling} from "../hooks";
 
 type Component = {
@@ -229,7 +229,7 @@ const PolicyForm: React.FC = () => {
   return (
     <>
       {formError ? <ErrorNotice message={formError} /> : null}
-      {notice ? <div className="notice ok-notice">{notice}</div> : null}
+      {notice ? <SuccessNotice message={notice}/> : null}
       <div className="field-grid">
         <label className="checkbox-label">
           <input

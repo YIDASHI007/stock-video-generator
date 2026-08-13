@@ -3,7 +3,7 @@ import {Check, Copy, Download, MoreHorizontal, Play, Plus, Settings2, Upload, Wo
 import {Link} from "react-router-dom";
 
 import {api, type PipelinePolicy, type PipelineRun, type PipelineStatusResponse} from "../api";
-import {ErrorNotice, formatDateTime} from "../components";
+import {ErrorNotice, InfoNotice, formatDateTime} from "../components";
 import {usePolling} from "../hooks";
 import {makeId, workflowStore, type WorkflowDefinition} from "../workspaceStore";
 
@@ -115,7 +115,7 @@ export const WorkflowsPage: React.FC = () => {
   return (
     <div className="page workflows-page">
       {error ? <ErrorNotice message={error} /> : null}
-      {notice ? <div className="notice info-notice">{notice}</div> : null}
+      {notice ? <InfoNotice message={notice}/> : null}
       <header className="module-header"><div><span className="module-kicker">CONTENT PRODUCTION</span><h1>工作流</h1><p>把稳定的内容生产方式保存为可复制、可导入和可重复运行的配置。</p></div><div className="module-actions"><input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importWorkflow(event.target.files?.[0] ?? null)}/><button type="button" className="button secondary" onClick={() => fileRef.current?.click()}><Upload size={15}/> 导入</button>{selected ? <button type="button" className="button secondary" onClick={() => downloadJson(selected)}><Download size={15}/> 导出</button> : null}<button type="button" className="button primary" onClick={() => selected && copyWorkflow(selected)}><Plus size={15}/> 复制新建</button></div></header>
 
       <div className="workflow-layout">

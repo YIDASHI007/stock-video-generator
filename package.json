@@ -1,6 +1,6 @@
 {
   "name": "stock-historical-simulation-video-generator",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "scripts": {

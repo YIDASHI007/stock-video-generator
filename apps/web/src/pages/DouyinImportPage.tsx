@@ -23,7 +23,7 @@ import {
   type DouyinJobSnapshot,
   type DouyinRemoteFile,
 } from "../api";
-import {ErrorNotice} from "../components";
+import {ErrorNotice, SuccessNotice} from "../components";
 
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const statusLabels: Record<string, string> = {
@@ -139,7 +139,7 @@ export const DouyinImportPage: React.FC = () => {
   return (
     <div className="page douyin-import-page">
       {error ? <ErrorNotice message={error}/> : null}
-      {notice ? <div className="notice ok-notice">{notice}</div> : null}
+      {notice ? <SuccessNotice message={notice}/> : null}
       <header className="module-header douyin-import-hero">
         <div><span className="module-kicker">REMOTE SOURCE INGEST</span><h1>链接提取</h1><p>把抖音视频送到远程处理电脑，取回原视频、发布文案、口播和精准时间轴。</p></div>
         <div className={`remote-chain ${connection ? "online" : ""}`}><span><Link2 size={15}/> 当前工作台</span><i/><span><Cloud size={15}/> 加密隧道</span><i/><span><ServerCog size={15}/> 处理电脑</span></div>

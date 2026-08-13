@@ -5,6 +5,8 @@ import {
   Bell,
   Boxes,
   CalendarDays,
+  CircleAlert,
+  CircleCheckBig,
   ChevronRight,
   CircleUserRound,
   Clapperboard,
@@ -16,6 +18,7 @@ import {
   GitBranch,
   HardDrive,
   History,
+  Info,
   LayoutDashboard,
   ListChecks,
   Logs,
@@ -30,6 +33,7 @@ import {
   Moon,
   Sun,
   Sparkles,
+  TriangleAlert,
   UploadCloud,
   UsersRound,
   UserSearch,
@@ -368,7 +372,7 @@ const navGroups: NavGroup[] = [
     icon: LayoutDashboard,
     match: (path) => path === "/",
     items: [
-      {to: "/", label: "运营总览", description: "系统指标与待办", icon: Gauge, end: true},
+      {to: "/", label: "运营总览", description: "内容、发布与账号状态", icon: Gauge, end: true},
     ],
   },
   {
@@ -517,7 +521,7 @@ export const Layout: React.FC = () => {
     <div className={`app-shell ${contextOpen ? "context-open" : "context-closed"}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <aside className="app-rail" aria-label="主导航">
-        <Link to="/" className="rail-brand" title="内容自动化工作台"><span>↗</span></Link>
+        <Link to="/" className="rail-brand" title="社媒工作台"><span>↗</span></Link>
         <nav className="rail-nav">
           {navGroups.map((group, index) => (
             <Link key={group.key} to={group.items[0].to} className={`${activeGroup.key === group.key ? "active" : ""} ${index >= 5 ? "mobile-overflow-only" : ""}`} title={group.label}>
@@ -556,7 +560,7 @@ export const Layout: React.FC = () => {
 
       <aside className="context-nav">
         <div className="context-head">
-          <Link to="/" className="context-brand"><strong>内容工作台</strong><small>CONTENT OPERATIONS</small></Link>
+          <Link to="/" className="context-brand"><strong>社媒工作台</strong><small>SOCIAL MEDIA OPS</small></Link>
           <button type="button" className="context-collapse" onClick={() => setContextOpen(false)} aria-label="收起导航"><PanelLeftClose size={17} /></button>
         </div>
         <div className="context-title"><activeGroup.icon size={17} /><span>{activeGroup.label}</span></div>
@@ -627,11 +631,58 @@ export const BackLink: React.FC<{to: string; label: string}> = ({to, label}) => 
   </Link>
 );
 
-export const ErrorNotice: React.FC<{message: string}> = ({message}) => (
-  <div className="notice error-notice">
-    <WarnIcon size={15} />
-    <span>{message}</span>
-  </div>
+export type NoticeTone = "success" | "info" | "warning" | "error";
+
+export type NoticeProps = {
+  message: React.ReactNode;
+  tone?: NoticeTone;
+  className?: string;
+};
+
+export const Notice: React.FC<NoticeProps> = ({
+  message,
+  tone = "info",
+  className = "",
+}) => {
+  const Icon = tone === "success"
+    ? CircleCheckBig
+    : tone === "info"
+      ? Info
+      : tone === "warning"
+        ? TriangleAlert
+        : CircleAlert;
+  const accessibility = tone === "error"
+    ? {role: "alert" as const, "aria-live": "assertive" as const}
+    : {role: "status" as const, "aria-live": "polite" as const};
+
+  return (
+    <div
+      className={`notice notice-${tone} ${className}`.trim()}
+      aria-atomic="true"
+      {...accessibility}
+    >
+      <span className="notice-icon" aria-hidden="true">
+        <Icon size={18} strokeWidth={2.2} />
+      </span>
+      <span className="notice-message">{message}</span>
+    </div>
+  );
+};
+
+export const SuccessNotice: React.FC<Omit<NoticeProps, "tone">> = (props) => (
+  <Notice tone="success" {...props} />
+);
+
+export const InfoNotice: React.FC<Omit<NoticeProps, "tone">> = (props) => (
+  <Notice tone="info" {...props} />
+);
+
+export const WarningNotice: React.FC<Omit<NoticeProps, "tone">> = (props) => (
+  <Notice tone="warning" {...props} />
+);
+
+export const ErrorNotice: React.FC<Omit<NoticeProps, "tone">> = (props) => (
+  <Notice tone="error" {...props} />
 );
 
 export const JobBadge: React.FC<{stage: string}> = ({stage}) => (

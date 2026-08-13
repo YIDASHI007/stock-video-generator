@@ -3,7 +3,7 @@ import {Archive, Download, Edit3, Film, Grid2X2, Heart, Link2, List, Play, Searc
 import {Link} from "react-router-dom";
 
 import {api, coverUrl, douyinImportedVideoUrl, thumbnailUrl, videoUrl, type DouyinImportedAsset, type GalleryOutput} from "../api";
-import {ErrorNotice, formatDateTime} from "../components";
+import {ErrorNotice, InfoNotice, formatDateTime} from "../components";
 import {usePolling} from "../hooks";
 import {contentMetaStore, type ContentAssetMeta} from "../workspaceStore";
 
@@ -69,7 +69,7 @@ export const ContentLibraryPage: React.FC = () => {
     <div className="page content-library-page">
       {error ? <ErrorNotice message={error} /> : null}
       {importedError ? <ErrorNotice message={importedError} /> : null}
-      {notice ? <div className="notice info-notice">{notice}</div> : null}
+      {notice ? <InfoNotice message={notice}/> : null}
       <header className="module-header"><div><span className="module-kicker">CONTENT ASSETS</span><h1>内容库</h1><p>集中查看成片、补充发布文案并管理内容生命周期。</p></div><div className="module-actions"><Link to="/workbench" className="button primary"><Film size={15}/> 生产新内容</Link></div></header>
 
       <section className="asset-toolbar">

@@ -10,7 +10,7 @@ import {
   API_BASE, api, type DouyinAccountPortrait, type DouyinAccountResolveResult,
   type DouyinBenchmarkAccount, type DouyinWork,
 } from "../api";
-import {ErrorNotice} from "../components";
+import {ErrorNotice, SuccessNotice} from "../components";
 
 const accountApi = "/api/integrations/douyin/accounts";
 const compactNumber = (value = 0) => new Intl.NumberFormat("zh-CN", {notation: "compact", maximumFractionDigits: 1}).format(value);
@@ -122,7 +122,7 @@ export const BenchmarkAccountsPage: React.FC = () => {
   const candidates = resolveResult?.account ? [resolveResult.account] : resolveResult?.candidates ?? [];
 
   return <div className="page benchmark-page">
-    {error ? <ErrorNotice message={error}/> : null}{notice ? <div className="notice ok-notice">{notice}</div> : null}
+    {error ? <ErrorNotice message={error}/> : null}{notice ? <SuccessNotice message={notice}/> : null}
     <header className="module-header benchmark-hero">
       <div><span className="module-kicker">BENCHMARK INTELLIGENCE</span><h1>对标账号</h1><p>每条作品、逐字稿与分析证据都绑定到原账号，持续沉淀为可复用的创作方法。</p></div>
       <div className="benchmark-flow" aria-label="分析流程"><span className={active ? "done" : "active"}><UsersRound size={15}/>添加账号</span><i/><span className={works.length ? "done" : active ? "active" : ""}><RefreshCw size={15}/>同步作品</span><i/><span className={processedCount ? "done" : works.length ? "active" : ""}><FileText size={15}/>提取文案</span><i/><span className={portrait ? "done" : processedCount ? "active" : ""}><Sparkles size={15}/>生成画像</span><i/><span className={active?.skill_export ? "done" : portrait ? "active" : ""}><WandSparkles size={15}/>导出 Skill</span></div>
