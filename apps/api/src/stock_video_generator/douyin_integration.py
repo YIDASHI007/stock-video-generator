@@ -194,7 +194,7 @@ class DouyinIntegration:
         return {
             "X-Client-ID": configured.client_id,
             "Authorization": f"Bearer {configured.api_key}",
-            "User-Agent": "StockVideoGenerator-DouyinIntegration/0.1.10",
+            "User-Agent": "StockVideoGenerator-DouyinIntegration/0.1.11",
         }
 
     def _load_jobs(self) -> dict[str, dict[str, Any]]:

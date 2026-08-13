@@ -155,6 +155,14 @@ def _estimate_update_size(update_info: Any) -> int:
     return max(0, int(getattr(target, "Size", 0) or 0))
 
 
+def _update_delivery_kind(update_info: Any) -> str:
+    return "delta" if list(getattr(update_info, "DeltasToTarget", None) or []) else "full"
+
+
+def _update_delivery_label(update_info: Any) -> str:
+    return "增量更新" if _update_delivery_kind(update_info) == "delta" else "完整更新"
+
+
 def _format_download_size(size: float) -> str:
     value = max(0.0, float(size))
     for suffix in ("B", "KB", "MB", "GB"):
@@ -207,6 +215,7 @@ def run_update_download_worker(
         progress: int = 0,
         total_bytes: int = 0,
         message: str = "",
+        delivery_kind: str = "unknown",
     ) -> None:
         _write_update_progress(
             progress_path,
@@ -216,6 +225,7 @@ def run_update_download_worker(
                 "total_bytes": max(0, int(total_bytes)),
                 "version": version,
                 "message": message,
+                "delivery_kind": delivery_kind,
                 "updated_at": time.time(),
             },
         )
@@ -238,7 +248,14 @@ def run_update_download_worker(
             )
         version = available_version
         total_bytes = _estimate_update_size(update)
-        emit("downloading", total_bytes=total_bytes, message="开始下载更新")
+        delivery_kind = _update_delivery_kind(update)
+        delivery_label = _update_delivery_label(update)
+        emit(
+            "downloading",
+            total_bytes=total_bytes,
+            message=f"开始下载{delivery_label}",
+            delivery_kind=delivery_kind,
+        )
 
         def on_progress(value: int) -> None:
             emit(
@@ -246,6 +263,7 @@ def run_update_download_worker(
                 progress=value,
                 total_bytes=total_bytes,
                 message="正在下载更新",
+                delivery_kind=delivery_kind,
             )
 
         manager.download_updates(update, progress_callback=on_progress)
@@ -254,6 +272,7 @@ def run_update_download_worker(
             progress=100,
             total_bytes=total_bytes,
             message="下载完成",
+            delivery_kind=delivery_kind,
         )
         return 0
     except BaseException as exc:
@@ -1221,7 +1240,11 @@ class LauncherWindow:
         else:
             message = f"发现新版本 v{version}"
         self.status_text.set(message)
-        self.status_detail_text.set(f"当前 v{__version__} · 可升级到 v{version}")
+        delivery_label = _update_delivery_label(self.update_info)
+        update_size = _format_download_size(_estimate_update_size(self.update_info))
+        self.status_detail_text.set(
+            f"当前 v{__version__} · {delivery_label} {update_size} · 可升级到 v{version}"
+        )
         self.status_label.set_color(RED if failed else PURPLE)
         self.status_indicator.set_result("error" if failed else "warning")
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
@@ -1257,7 +1280,8 @@ class LauncherWindow:
         self.step_progress.place_forget()
         version = self.update_info.TargetFullRelease.Version
         total_bytes = _estimate_update_size(self.update_info)
-        self.download_title_text.set(f"正在准备 v{version}")
+        delivery_label = _update_delivery_label(self.update_info)
+        self.download_title_text.set(f"正在准备{delivery_label} v{version}")
         self.download_pct_text.set("0%")
         self.download_detail_text.set(
             f"0B / {_format_download_size(total_bytes)}"
@@ -1341,6 +1365,8 @@ class LauncherWindow:
         progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         total_bytes = max(0, int(payload.get("total_bytes", 0) or 0))
         version = str(payload.get("version", "")).lstrip("v")
+        delivery_kind = str(payload.get("delivery_kind", "unknown"))
+        delivery_label = "增量更新" if delivery_kind == "delta" else "完整更新"
         downloaded = total_bytes * progress / 100
         now = time.monotonic()
         elapsed = now - self._download_last_time
@@ -1361,7 +1387,9 @@ class LauncherWindow:
         elif state == "complete":
             self.download_title_text.set("下载完成，正在安装")
         else:
-            self.download_title_text.set(f"正在下载 v{version}" if version else "正在下载更新")
+            self.download_title_text.set(
+                f"正在下载{delivery_label} v{version}" if version else f"正在下载{delivery_label}"
+            )
         self.download_pct_text.set(f"{progress}%")
         self.download_progress.set_value(progress)
         if total_bytes:
