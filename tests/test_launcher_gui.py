@@ -11,6 +11,8 @@ from stock_video_generator.launcher_gui import (
     UpdateCheckResult,
     _acquire_single_instance,
     _estimate_update_size,
+    _update_delivery_kind,
+    _update_delivery_label,
     _format_download_eta,
     _format_download_size,
     _format_update_summary,
@@ -95,7 +97,7 @@ def test_release_api_url_accepts_github_repository() -> None:
 
 
 def test_workbench_url_is_versioned_to_avoid_stale_browser_tabs() -> None:
-    assert _workbench_url(8877) == "http://127.0.0.1:8877/?desktop=v0.1.10"
+    assert _workbench_url(8877) == "http://127.0.0.1:8877/?desktop=v0.1.11"
 
 
 def test_development_mode_requires_git_checkout(monkeypatch, tmp_path) -> None:
@@ -110,19 +112,19 @@ def test_update_summary_explains_development_and_installed_modes() -> None:
     development = UpdateCheckResult(
         manager=None,
         update=None,
-        current_version="0.1.10",
+        current_version="0.1.11",
         mode="development",
         latest_version="0.1.6",
     )
     installed = UpdateCheckResult(
         manager=None,
         update=None,
-        current_version="0.1.10",
+        current_version="0.1.11",
         mode="installed",
     )
 
-    assert _format_update_summary(development) == "开发版 v0.1.10 · 正式版 v0.1.6"
-    assert _format_update_summary(installed) == "已是最新 v0.1.10"
+    assert _format_update_summary(development) == "开发版 v0.1.11 · 正式版 v0.1.6"
+    assert _format_update_summary(installed) == "已是最新 v0.1.11"
 
 
 def test_single_instance_guard_closes_created_mutex(monkeypatch):
@@ -175,7 +177,7 @@ def test_duplicate_launcher_opens_existing_workbench_without_creating_window(
     result = run_launcher_gui(tmp_path, tmp_path, 8877)
 
     assert result == 0
-    assert opened == ["http://127.0.0.1:8877/?desktop=v0.1.10"]
+    assert opened == ["http://127.0.0.1:8877/?desktop=v0.1.11"]
 
 
 def test_update_size_prefers_delta_chain() -> None:
@@ -185,6 +187,8 @@ def test_update_size_prefers_delta_chain() -> None:
     )
 
     assert _estimate_update_size(update) == 200
+    assert _update_delivery_kind(update) == "delta"
+    assert _update_delivery_label(update) == "增量更新"
 
 
 def test_update_size_falls_back_to_full_release() -> None:
@@ -193,6 +197,8 @@ def test_update_size_falls_back_to_full_release() -> None:
     )
 
     assert _estimate_update_size(update) == 4096
+    assert _update_delivery_kind(update) == "full"
+    assert _update_delivery_label(update) == "完整更新"
 
 
 def test_download_labels_are_compact_and_readable() -> None:
@@ -203,7 +209,7 @@ def test_download_labels_are_compact_and_readable() -> None:
 
 
 def test_update_download_worker_reports_progress(monkeypatch, tmp_path) -> None:
-    target = SimpleNamespace(Version="0.1.10", Size=1024)
+    target = SimpleNamespace(Version="0.1.11", Size=1024)
     update = SimpleNamespace(DeltasToTarget=[], TargetFullRelease=target)
 
     class FakeUpdateManager:
@@ -234,7 +240,7 @@ def test_update_download_worker_reports_progress(monkeypatch, tmp_path) -> None:
     progress_file = tmp_path / "progress.json"
 
     result = run_update_download_worker(
-        tmp_path, tmp_path, progress_file, requested_version="0.1.10"
+        tmp_path, tmp_path, progress_file, requested_version="0.1.11"
     )
 
     payload = json.loads(progress_file.read_text(encoding="utf-8"))
@@ -242,4 +248,5 @@ def test_update_download_worker_reports_progress(monkeypatch, tmp_path) -> None:
     assert payload["state"] == "complete"
     assert payload["progress"] == 100
     assert payload["total_bytes"] == 1024
-    assert payload["version"] == "0.1.10"
+    assert payload["version"] == "0.1.11"
+    assert payload["delivery_kind"] == "full"

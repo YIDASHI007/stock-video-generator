@@ -65,7 +65,22 @@ jobs:
           .\.venv\Scripts\python.exe -m pytest -q
           .\scripts\build-windows-release.ps1 `
             -Version "${{ steps.version.outputs.value }}" `
-            -UpdateRepoUrl "https://github.com/${{ env.RELEASE_REPOSITORY }}"
+            -UpdateRepoUrl "https://github.com/${{ env.RELEASE_REPOSITORY }}" `
+            -UpdateRepoToken "${{ secrets.RELEASE_REPO_TOKEN }}" `
+            -RequireDelta $true
+
+      - name: Verify incremental update assets
+        shell: pwsh
+        run: |
+          $releaseDir = "build/windows-${{ steps.version.outputs.value }}/Releases"
+          $version = "${{ steps.version.outputs.value }}"
+          $full = Get-Item "$releaseDir/StockVideoGenerator-$version-full.nupkg"
+          $delta = Get-Item "$releaseDir/StockVideoGenerator-$version-delta.nupkg"
+          if ($delta.Length -ge $full.Length) {
+            throw "Delta package must be smaller than the full package."
+          }
+          Write-Host "Full:  $([math]::Round($full.Length / 1MB, 1)) MB"
+          Write-Host "Delta: $([math]::Round($delta.Length / 1MB, 1)) MB"
 
       - name: Upload workflow artifact
         # The public GitHub Release below is the update source of record. A full

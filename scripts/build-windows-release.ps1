@@ -5,6 +5,12 @@ param(
 
     [string]$UpdateRepoUrl = "",
 
+    [string]$UpdateRepoToken = "",
+
+    [bool]$RequireDelta = $false,
+
+    [string]$PreviousPackagePath = "",
+
     [string]$OutputRoot = ""
 )
 
@@ -128,6 +134,41 @@ if (-not (Test-Path -LiteralPath $vpk -PathType Leaf)) {
     $vpk = $vpkCommand.Source
 }
 
+if ($PreviousPackagePath) {
+    $resolvedPreviousPackage = [System.IO.Path]::GetFullPath($PreviousPackagePath)
+    if (-not (Test-Path -LiteralPath $resolvedPreviousPackage -PathType Leaf)) {
+        throw "PreviousPackagePath was not found: $resolvedPreviousPackage"
+    }
+    if (-not $resolvedPreviousPackage.EndsWith("-full.nupkg", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "PreviousPackagePath must point to a Velopack full .nupkg package."
+    }
+    Write-Host "[baseline] Using local previous package: $resolvedPreviousPackage"
+    Copy-Item -LiteralPath $resolvedPreviousPackage -Destination $releaseDir -Force
+} elseif ($UpdateRepoUrl) {
+    Write-Host "[baseline] Downloading the latest published package for delta generation..."
+    $downloadArgs = @(
+        "download", "github",
+        "--repoUrl", $UpdateRepoUrl,
+        "--channel", "win",
+        "--outputDir", $releaseDir,
+        "--timeout", "30"
+    )
+    if ($UpdateRepoToken) {
+        $downloadArgs += @("--token", $UpdateRepoToken)
+    }
+    & $vpk @downloadArgs
+    if ($LASTEXITCODE -ne 0) {
+        if ($RequireDelta) {
+            throw "Unable to download the previous release; refusing a full-only update."
+        }
+        Write-Warning "Previous release download failed. This build may only contain a full package."
+    }
+}
+$baselinePackages = @(
+    Get-ChildItem -LiteralPath $releaseDir -Filter "*-full.nupkg" -File |
+        Where-Object { $_.Name -ne "StockVideoGenerator-$Version-full.nupkg" }
+)
+
 Write-Host "[1/6] Building web, renderer and publisher sources..."
 & pnpm --dir $projectRoot install --frozen-lockfile --prod=false
 if ($LASTEXITCODE -ne 0) { throw "pnpm install failed." }
@@ -229,9 +270,52 @@ Write-Host "[6/6] Building the Velopack installer and delta package..."
     --icon $appIcon `
     --shortcuts "Desktop,StartMenuRoot" `
     --channel win `
+    --delta BestSpeed `
     --outputDir $releaseDir `
     --yes
 if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed." }
+
+$fullPackage = Get-ChildItem -LiteralPath $releaseDir `
+    -Filter "StockVideoGenerator-$Version-full.nupkg" -File | Select-Object -First 1
+$deltaPackage = Get-ChildItem -LiteralPath $releaseDir `
+    -Filter "StockVideoGenerator-$Version-delta.nupkg" -File | Select-Object -First 1
+if (-not $fullPackage) {
+    throw "Full update package was not generated for v$Version."
+}
+if ($RequireDelta -and -not $deltaPackage) {
+    throw "Delta update package was not generated for v$Version; refusing to publish."
+}
+if ($deltaPackage) {
+    $savingPercent = [math]::Round(
+        (1 - ($deltaPackage.Length / [double]$fullPackage.Length)) * 100,
+        1
+    )
+    Write-Host (
+        "Delta package ready: {0:N1} MB vs full {1:N1} MB ({2}% smaller)." -f `
+        ($deltaPackage.Length / 1MB),
+        ($fullPackage.Length / 1MB),
+        $savingPercent
+    )
+}
+
+# The previous full package is a build input only. GitHub-backed Velopack feeds
+# expect each release to publish one current full package and one current delta.
+foreach ($baselinePackage in $baselinePackages) {
+    Remove-Item -LiteralPath $baselinePackage.FullName -Force
+}
+
+$releaseIndexPath = Join-Path $releaseDir "releases.win.json"
+if (-not (Test-Path -LiteralPath $releaseIndexPath -PathType Leaf)) {
+    throw "Velopack release index was not generated."
+}
+$releaseIndex = Get-Content -LiteralPath $releaseIndexPath -Raw | ConvertFrom-Json
+$currentAssets = @($releaseIndex.Assets | Where-Object { $_.Version -eq $Version })
+if (-not ($currentAssets | Where-Object { $_.Type -eq "Full" })) {
+    throw "Release index does not contain the current full package."
+}
+if ($RequireDelta -and -not ($currentAssets | Where-Object { $_.Type -eq "Delta" })) {
+    throw "Release index does not contain the current delta package."
+}
 
 Write-Host "Windows release created at: $releaseDir"
 Get-ChildItem -LiteralPath $releaseDir | Select-Object Name, Length, LastWriteTime
