@@ -1,0 +1,64 @@
+name: Build optional Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Installer version, for example 0.1.13"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    env:
+      CI: "true"
+      RELEASE_REPOSITORY: "YIDASHI007/stock-video-generator-releases"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.9.0"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -e ".[dev,build]"
+          dotnet tool install --global vpk --version 1.2.0
+
+      - name: Test and package optional installer
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pytest -q
+          .\scripts\build-windows-release.ps1 `
+            -Version "${{ inputs.version }}" `
+            -UpdateRepoUrl "https://github.com/${{ env.RELEASE_REPOSITORY }}" `
+            -UpdateRepoToken "${{ secrets.RELEASE_REPO_TOKEN }}" `
+            -RequireDelta $true
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StockVideoGenerator-${{ inputs.version }}-windows
+          path: build/windows-${{ inputs.version }}/Releases/*
+          if-no-files-found: error
+

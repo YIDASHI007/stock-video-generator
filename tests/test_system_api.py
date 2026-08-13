@@ -10,6 +10,7 @@ from stock_video_generator.main import create_app
 
 def make_client(tmp_path: Path) -> TestClient:
     settings = Settings(
+        runtime_dir=tmp_path,
         data_dir=tmp_path / "data",
         log_dir=tmp_path / "logs",
         node_executable="definitely-missing-node-for-test",
@@ -28,6 +29,14 @@ def test_system_status_reports_local_storage_facts(tmp_path: Path) -> None:
     assert payload["database_path"].endswith("stock_video.db")
     assert payload["database_size_bytes"] > 0
     assert payload["disk_total_bytes"] >= payload["disk_free_bytes"] > 0
+
+
+def test_system_source_update_is_read_only_for_installed_runtime(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
+        response = client.get("/api/system/source-update")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "unsupported"
 
 
 def test_system_backup_contains_database_and_policy(tmp_path: Path) -> None:

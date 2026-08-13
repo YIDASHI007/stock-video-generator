@@ -1,14 +1,14 @@
-import React, {useEffect, useMemo, useState} from "react";
-import {useNavigate} from "react-router-dom";
+import React, {useEffect, useMemo, useRef, useState} from "react";
+import {Link, useNavigate} from "react-router-dom";
 import {
-  Archive, BarChart3, Check, Clock3, Copy, Download, ExternalLink, FileText,
+  Archive, BarChart3, BrainCircuit, Check, Clock3, Copy, Download, ExternalLink, FileText,
   LibraryBig, LoaderCircle, PencilLine, Plus, RefreshCw, Save, Search, Sparkles,
   Trash2, UserSearch, UsersRound, Video, WandSparkles, X,
 } from "lucide-react";
 
 import {
   API_BASE, api, type DouyinAccountPortrait, type DouyinAccountResolveResult,
-  type DouyinBenchmarkAccount, type DouyinWork,
+  type DouyinBenchmarkAccount, type DouyinWork, type AiModelSettings,
 } from "../api";
 import {ErrorNotice, SuccessNotice} from "../components";
 
@@ -30,6 +30,9 @@ const toSrt = (work: DouyinWork) => (work.segments ?? []).map((item, index) => {
 }).join("\n");
 
 type PageTab = "works" | "transcripts" | "methodology";
+const activeJobStatuses = new Set(["queued", "resolving", "downloading", "transcribing", "packaging", "running"]);
+const failedJobStatuses = new Set(["failed", "cancelled", "interrupted"]);
+const batchStorageKey = (secUid: string) => `benchmark-batch:${secUid}`;
 
 export const BenchmarkAccountsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -47,6 +50,10 @@ export const BenchmarkAccountsPage: React.FC = () => {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [isProgressRefreshing, setIsProgressRefreshing] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiModelSettings | null>(null);
+  const progressRequest = useRef(false);
 
   const active = accounts.find((item) => item.sec_uid === activeId) ?? accounts[0] ?? null;
   const works = active?.works ?? [];
@@ -55,6 +62,20 @@ export const BenchmarkAccountsPage: React.FC = () => {
   const visibleWorks = (tab === "transcripts" ? transcripts : works).filter((item) => `${item.title} ${item.transcript ?? ""}`.toLowerCase().includes(workQuery.trim().toLowerCase()));
   const filteredAccounts = accounts.filter((item) => `${item.nickname} ${item.douyin_id ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   const processedCount = transcripts.length;
+  const batchWorks = batchIds.map((id) => works.find((work) => work.aweme_id === id)).filter((work): work is DouyinWork => Boolean(work));
+  const batchProgress = useMemo(() => {
+    const total = batchIds.length;
+    const completed = batchWorks.filter((work) => Boolean(work.transcript) || work.processing_status === "completed").length;
+    const failed = batchWorks.filter((work) => failedJobStatuses.has(work.processing_status ?? "")).length;
+    const processing = batchWorks.filter((work) => activeJobStatuses.has(work.processing_status ?? "") && work.processing_status !== "queued").length;
+    const queued = Math.max(0, total - completed - failed - processing);
+    const itemProgress = batchWorks.reduce((sum, work) => {
+      if (Boolean(work.transcript) || work.processing_status === "completed") return sum + 100;
+      if (failedJobStatuses.has(work.processing_status ?? "")) return sum + 100;
+      return sum + Math.max(0, Math.min(99, work.processing_progress ?? 0));
+    }, 0);
+    return {total, completed, failed, processing, queued, percent: total ? Math.round(itemProgress / total) : 0};
+  }, [batchIds, batchWorks]);
   const metrics = useMemo(() => ({
     accounts: accounts.length,
     works: accounts.reduce((sum, item) => sum + (item.works?.length ?? item.total_stored ?? 0), 0),
@@ -67,8 +88,34 @@ export const BenchmarkAccountsPage: React.FC = () => {
     setAccounts(value); setActiveId((current) => focusId ?? current ?? value[0]?.sec_uid ?? ""); return value;
   };
   useEffect(() => { void loadAccounts().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason))); }, []);
+  useEffect(() => { void api<AiModelSettings>("/api/settings/ai-model").then(setAiSettings).catch(() => setAiSettings(null)); }, []);
   useEffect(() => { setSelected(new Set()); setOpenWorkId(""); }, [active?.sec_uid]);
   useEffect(() => { setEditText(openWork?.transcript ?? ""); setEditing(false); }, [openWork?.aweme_id, openWork?.transcript]);
+  useEffect(() => {
+    if (!active?.sec_uid) { setBatchIds([]); return; }
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(batchStorageKey(active.sec_uid)) ?? "[]");
+      const restored = Array.isArray(stored) ? stored.filter((value): value is string => typeof value === "string") : [];
+      const activeIds = works
+        .filter((work) => work.job_id && activeJobStatuses.has(work.processing_status ?? ""))
+        .map((work) => work.aweme_id);
+      const nextIds = restored.length ? restored : activeIds;
+      if (!restored.length && activeIds.length) window.localStorage.setItem(batchStorageKey(active.sec_uid), JSON.stringify(activeIds));
+      setBatchIds(nextIds);
+    } catch { setBatchIds([]); }
+  }, [active?.sec_uid, works.length]);
+  useEffect(() => {
+    if (!active?.sec_uid || !batchIds.length || batchProgress.completed + batchProgress.failed >= batchProgress.total) return;
+    let cancelled = false;
+    const refresh = async () => {
+      if (progressRequest.current) return;
+      progressRequest.current = true; setIsProgressRefreshing(true);
+      try { await loadAccounts(active.sec_uid); } catch { /* Keep the last good snapshot and retry. */ }
+      finally { progressRequest.current = false; if (!cancelled) setIsProgressRefreshing(false); }
+    };
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [active?.sec_uid, batchIds.length, batchProgress.completed, batchProgress.failed, batchProgress.total]);
 
   const run = async (key: string, task: () => Promise<void>) => {
     setBusy(key); setError(null); setNotice(null);
@@ -88,7 +135,8 @@ export const BenchmarkAccountsPage: React.FC = () => {
   });
   const batch = (ids = [...selected]) => active && run("batch", async () => {
     const result = await api<{count: number}>(`${accountApi}/${encodeURIComponent(active.sec_uid)}/batch`, {method: "POST", body: JSON.stringify({aweme_ids: ids, language: null})});
-    await loadAccounts(active.sec_uid); setSelected(new Set()); setNotice(`已提交 ${result.count} 条作品，任务完成后会自动归档到这个账号。`);
+    window.localStorage.setItem(batchStorageKey(active.sec_uid), JSON.stringify(ids));
+    setBatchIds(ids); await loadAccounts(active.sec_uid); setSelected(new Set()); setNotice(`已提交 ${result.count} 条作品，正在自动刷新处理进度。`);
   });
   const analyze = () => active && run("analyze", async () => {
     const portrait = await api<DouyinAccountPortrait>(`${accountApi}/${encodeURIComponent(active.sec_uid)}/analyze`, {method: "POST", body: JSON.stringify({sample_size: Math.min(50, Math.max(5, works.length))})});
@@ -143,13 +191,18 @@ export const BenchmarkAccountsPage: React.FC = () => {
             <div className="benchmark-actions"><button type="button" className="button secondary" onClick={() => void sync()} disabled={Boolean(busy)}>{busy === "sync" ? <LoaderCircle className="spin" size={14}/> : <RefreshCw size={14}/>} 同步作品</button><button type="button" className="icon-button danger" title="移除对标账号" onClick={() => void remove()} disabled={Boolean(busy)}><Trash2 size={15}/></button></div>
           </section>
           <nav className="benchmark-tabs" aria-label="账号档案栏目"><button className={tab === "works" ? "active" : ""} onClick={() => setTab("works")}><Video size={15}/>作品档案 <b>{works.length}</b></button><button className={tab === "transcripts" ? "active" : ""} onClick={() => setTab("transcripts")}><LibraryBig size={15}/>文案库 <b>{transcripts.length}</b></button><button className={tab === "methodology" ? "active" : ""} onClick={() => { setTab("methodology"); if (portrait && !portrait.methodology) void refreshPortrait(); }}><WandSparkles size={15}/>画像与方法论</button></nav>
+          {batchProgress.total ? <section className={`benchmark-batch-progress ${batchProgress.failed ? "has-failure" : ""}`} aria-live="polite" aria-label={`批量提取进度 ${batchProgress.percent}%`}>
+            <div className="batch-progress-head"><div><span>{batchProgress.completed + batchProgress.failed >= batchProgress.total ? <Check size={16}/> : <LoaderCircle className={isProgressRefreshing ? "spin" : ""} size={16}/>}批量提取</span><strong>{batchProgress.completed + batchProgress.failed} / {batchProgress.total} 条已处理</strong></div><b>{batchProgress.percent}%</b></div>
+            <div className="batch-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={batchProgress.percent}><i style={{transform: `scaleX(${batchProgress.percent / 100})`}}/></div>
+            <div className="batch-progress-counts"><span className="completed">完成 <b>{batchProgress.completed}</b></span><span className="processing">处理中 <b>{batchProgress.processing}</b></span><span>排队 <b>{batchProgress.queued}</b></span>{batchProgress.failed ? <span className="failed">失败 <b>{batchProgress.failed}</b></span> : null}<small>{batchProgress.completed + batchProgress.failed < batchProgress.total ? "每 5 秒自动刷新" : "本批任务已结束"}</small></div>
+          </section> : null}
           {tab !== "methodology" ? <section className="benchmark-works-card benchmark-archive-card">
             <header><div><span className="panel-kicker">{tab === "works" ? "PUBLIC WORKS" : "TRANSCRIPT ARCHIVE"}</span><h2>{tab === "works" ? "作品档案" : `${active.nickname} 的账号文案库`}</h2></div><div className="archive-tools"><label><Search size={14}/><input value={workQuery} onChange={(event) => setWorkQuery(event.target.value)} placeholder="搜索标题或文案"/></label><button type="button" className="button secondary" onClick={() => setSelected(new Set(works.slice(0, 20).map((item) => item.aweme_id)))} disabled={!works.length}>选择前 20 条</button><button type="button" className="button primary" onClick={() => void batch()} disabled={!selected.size || Boolean(busy)}>{busy === "batch" ? <LoaderCircle className="spin" size={14}/> : <FileText size={14}/>} 提取 {selected.size || "所选"} 条</button></div></header>
-            <div className="benchmark-work-list">{visibleWorks.map((work) => <article key={work.aweme_id} className={openWorkId === work.aweme_id ? "opened" : ""} onClick={() => openArchive(work)}>{work.cover_url ? <img src={work.cover_url} alt=""/> : <span className="work-cover"><Video size={20}/></span>}<div><h3>{work.title || "未命名作品"}</h3><p><Clock3 size={12}/>{work.duration ? `${Math.round(work.duration)} 秒` : "时长未知"}<b>赞 {compactNumber(work.statistics?.like)}</b><b>评 {compactNumber(work.statistics?.comment)}</b></p><small className={work.transcript ? "ready" : work.processing_status === "failed" ? "failed" : ""}>{work.transcript ? `文案已提取 · ${work.segments?.length ?? 0} 个时间片` : work.processing_status === "failed" ? `提取失败：${work.processing_error ?? "请重试"}` : work.processing_status ? `处理中：${work.processing_status}` : "尚未提取文案"}</small></div><button className={selected.has(work.aweme_id) ? "work-select selected" : "work-select"} title="加入批量选择" onClick={(event) => { event.stopPropagation(); toggleWork(work); }}>{selected.has(work.aweme_id) ? <Check size={13}/> : null}</button></article>)}{!visibleWorks.length ? <div className="benchmark-empty-list"><RefreshCw size={23}/><strong>{tab === "transcripts" ? "还没有已提取文案" : "没有匹配作品"}</strong><span>{tab === "transcripts" ? "在作品档案中勾选作品并提取，完成后会自动归档到这里。" : "尝试清空搜索条件。"}</span></div> : null}</div>
-          </section> : <section className="methodology-layout">
-            <article className="benchmark-portrait-card"><header><div><span className="panel-kicker">ACCOUNT PORTRAIT</span><h2>定位与风格画像</h2></div><button type="button" className="button secondary" onClick={() => void analyze()} disabled={!works.length || Boolean(busy)}>{busy === "analyze" ? <LoaderCircle className="spin" size={14}/> : <Sparkles size={14}/>} {portrait ? "重新分析" : "生成画像"}</button></header>{portrait ? <div className="portrait-body"><div className="portrait-position"><span>定位结论</span><p>{portrait.positioning}</p></div><div className="portrait-section"><h3>内容支柱</h3>{portrait.content_pillars.map((item) => <div className="pillar" key={item.name}><span><b>{item.name}</b><em>{item.ratio}%</em></span><i><b style={{width: `${item.ratio}%`}}/></i></div>)}</div><div className="portrait-tags">{portrait.top_hashtags.slice(0, 8).map((item) => <span key={item.name}>#{item.name}</span>)}</div></div> : <div className="portrait-empty"><Sparkles size={28}/><strong>画像等待生成</strong><p>同步作品后可生成初步画像；完整逐字稿越多，表达风格越准确。</p></div>}</article>
-            <article className="methodology-card"><header><div><span className="panel-kicker">CREATIVE METHOD</span><h2>创作方法论</h2></div>{methodology ? <span className="confidence">{methodology.confidence}置信度</span> : null}</header>{methodology ? <div className="methodology-body"><div className="method-progress"><span><b>{methodology.transcript_count}</b> / {methodology.sample_count} 条完整逐字稿</span><i><b style={{width: `${methodology.completion_ratio}%`}}/></i><small>逐字稿覆盖率 {methodology.completion_ratio}%</small></div><section><h3>常用开场机制</h3><div className="method-chips">{methodology.hook_patterns.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div></section><section><h3>叙事推进结构</h3><div className="method-chips">{methodology.narrative_structures.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div></section><section className="method-stats"><span><b>{methodology.language_style.average_sentence_chars}</b>字 / 句</span><span><b>{methodology.language_style.estimated_chars_per_second}</b>字 / 秒</span><span><b>{methodology.language_style.short_line_ratio}%</b>短句占比</span></section><div className="skill-export"><Archive size={20}/><div><strong>生成可复用 Skill</strong><p>包含账号画像、钩子和结构规律、节奏参数、证据索引与原创边界。</p></div><button className="button primary" onClick={() => void exportSkill()} disabled={Boolean(busy)}>{busy === "skill" ? <LoaderCircle className="spin" size={14}/> : <Download size={14}/>} 导出 Skill</button></div></div> : <div className="portrait-empty"><WandSparkles size={28}/><strong>尚未提炼方法论</strong><p>点击左侧“生成画像”，系统会同时整理有证据支撑的创作方法。</p></div>}</article>
-          </section>}
+            <div className="benchmark-work-list">{visibleWorks.map((work) => <article key={work.aweme_id} className={openWorkId === work.aweme_id ? "opened" : ""} onClick={() => openArchive(work)}>{work.cover_url ? <img src={work.cover_url} alt="" loading="lazy"/> : <span className="work-cover"><Video size={20}/></span>}<div><h3>{work.title || "未命名作品"}</h3><p><Clock3 size={12}/>{work.duration ? `${Math.round(work.duration)} 秒` : "时长未知"}<b>赞 {compactNumber(work.statistics?.like)}</b><b>评 {compactNumber(work.statistics?.comment)}</b></p><small className={work.transcript ? "ready" : failedJobStatuses.has(work.processing_status ?? "") ? "failed" : ""}>{work.transcript ? `文案已提取 · ${work.segments?.length ?? 0} 个时间片` : failedJobStatuses.has(work.processing_status ?? "") ? `提取失败：${work.processing_error ?? "请重试"}` : work.processing_status ? `${work.processing_stage ?? (work.processing_status === "queued" ? "等待处理" : "正在处理")} · ${work.processing_progress ?? 0}%` : "尚未提取文案"}</small></div><button className={selected.has(work.aweme_id) ? "work-select selected" : "work-select"} title="加入批量选择" aria-label={`选择作品：${work.title || "未命名作品"}`} onClick={(event) => { event.stopPropagation(); toggleWork(work); }}>{selected.has(work.aweme_id) ? <Check size={13}/> : null}</button></article>)}{!visibleWorks.length ? <div className="benchmark-empty-list"><RefreshCw size={23}/><strong>{tab === "transcripts" ? "还没有已提取文案" : "没有匹配作品"}</strong><span>{tab === "transcripts" ? "在作品档案中勾选作品并提取，完成后会自动归档到这里。" : "尝试清空搜索条件。"}</span></div> : null}</div>
+          </section> : <><div className={`ai-analysis-banner ${aiSettings?.api_key_configured && aiSettings.enabled ? "ready" : "needs-config"}`}><BrainCircuit size={18}/><div><strong>{aiSettings?.api_key_configured && aiSettings.enabled ? `使用 ${aiSettings.model} 深度分析` : "先配置 DeepSeek，才能生成真正可执行的方法论"}</strong><span>{aiSettings?.api_key_configured && aiSettings.enabled ? "完整逐字稿会发送至 DeepSeek，分析结果与 Skill 保存在当前电脑。" : "当前旧画像只有统计标签；配置模型后可分析作者视角、细节选择、情绪曲线和重写规则。"}</span></div>{aiSettings?.api_key_configured && aiSettings.enabled ? <em>模型就绪</em> : <Link className="button secondary" to="/system/ai-models">配置 AI 模型</Link>}</div><section className="methodology-layout">
+            <article className="benchmark-portrait-card"><header><div><span className="panel-kicker">ACCOUNT PORTRAIT</span><h2>定位与风格画像</h2></div><button type="button" className="button secondary" onClick={() => void analyze()} disabled={!works.length || Boolean(busy) || !aiSettings?.enabled || !aiSettings.api_key_configured}>{busy === "analyze" ? <LoaderCircle className="spin" size={14}/> : <Sparkles size={14}/>} {portrait ? "重新分析" : "生成画像"}</button></header>{portrait ? <div className="portrait-body"><div className="portrait-position"><span>定位结论</span><p>{portrait.positioning}</p></div><div className="portrait-section"><h3>内容支柱</h3>{portrait.content_pillars.map((item) => <div className="pillar" key={item.name}><span><b>{item.name}</b><em>{item.ratio}%</em></span><i><b style={{width: `${item.ratio}%`}}/></i></div>)}</div>{methodology?.author_lens?.length ? <div className="portrait-section"><h3>作者观察视角</h3><ul>{methodology.author_lens.slice(0, 6).map((item) => <li key={item}>{item}</li>)}</ul></div> : null}<div className="portrait-tags">{portrait.top_hashtags.slice(0, 8).map((item) => <span key={item.name}>#{item.name}</span>)}</div></div> : <div className="portrait-empty"><Sparkles size={28}/><strong>画像等待生成</strong><p>至少准备 5 条完整逐字稿；20 条以上更适合建立稳定的写作方法。</p></div>}</article>
+            <article className="methodology-card"><header><div><span className="panel-kicker">CREATIVE METHOD</span><h2>创作方法论</h2></div>{methodology ? <span className="confidence">{methodology.confidence}置信度</span> : null}</header>{methodology ? <div className="methodology-body"><div className="method-progress"><span><b>{methodology.transcript_count}</b> / {methodology.sample_count} 条完整逐字稿</span><i><b style={{width: `${methodology.completion_ratio}%`}}/></i><small>{methodology.analysis_engine ? `${methodology.analysis_engine.provider} · ${methodology.analysis_engine.model}` : "旧版规则统计，建议重新分析"}</small></div>{methodology.style_summary ? <section className="method-summary"><h3>写作本质</h3><p>{methodology.style_summary}</p></section> : null}<section><h3>栏目母体</h3><div className="method-chips">{methodology.writing_workflows?.map((item) => <span key={item.name}>{item.name}</span>) ?? methodology.narrative_structures.map((item) => <span key={item.name}>{item.name}</span>)}</div></section>{methodology.detail_selection?.length ? <section><h3>细节选择方法</h3><ul className="method-list">{methodology.detail_selection.slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul></section> : null}{methodology.emotional_arc?.length ? <section><h3>情绪推进</h3><ul className="method-list">{methodology.emotional_arc.slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul></section> : null}<div className="skill-export"><Archive size={20}/><div><strong>生成可复用 Skill</strong><p>包含作者视角、两套栏目母体、细节算法、情绪曲线、重写检查和原创边界。</p></div><button className="button primary" onClick={() => void exportSkill()} disabled={Boolean(busy) || !methodology.analysis_engine}>{busy === "skill" ? <LoaderCircle className="spin" size={14}/> : <Download size={14}/>} 导出 Skill</button></div></div> : <div className="portrait-empty"><WandSparkles size={28}/><strong>尚未提炼方法论</strong><p>配置 DeepSeek 后点击左侧“生成画像”，系统会深读完整逐字稿。</p></div>}</article>
+          </section></>}
         </>}
       </main>
     </div>

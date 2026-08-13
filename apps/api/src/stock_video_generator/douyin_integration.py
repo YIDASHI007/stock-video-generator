@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import zipfile
 from collections.abc import AsyncIterator
 from ctypes import wintypes
 from datetime import UTC, datetime
@@ -17,8 +18,8 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
+from stock_video_generator.ai_models import AiModelService
 from stock_video_generator.config import Settings
-
 
 _MOJIBAKE_MARKERS = re.compile(r"[ÃÂäåæçèéð][\x80-\xBF\w]?")
 
@@ -34,7 +35,12 @@ def _looks_like_mojibake(value: Any) -> bool:
 def _repair_work_transcript(work: dict[str, Any]) -> bool:
     transcript = work.get("transcript")
     raw = work.get("transcript_raw")
-    if not (_looks_like_mojibake(transcript) and isinstance(raw, str) and raw.strip() and not _looks_like_mojibake(raw)):
+    if not (
+        _looks_like_mojibake(transcript)
+        and isinstance(raw, str)
+        and raw.strip()
+        and not _looks_like_mojibake(raw)
+    ):
         return False
     work["transcript"] = raw.strip()
     if _looks_like_mojibake(work.get("transcript_edited")):
@@ -113,12 +119,15 @@ def _dpapi(value: bytes, *, decrypt: bool) -> bytes:
     kernel32 = ctypes.windll.kernel32
     function = crypt32.CryptUnprotectData if decrypt else crypt32.CryptProtectData
     if decrypt:
-        ok = function(
-            ctypes.byref(in_blob), None, None, None, None, 0, ctypes.byref(out_blob)
-        )
+        ok = function(ctypes.byref(in_blob), None, None, None, None, 0, ctypes.byref(out_blob))
     else:
         ok = function(
-            ctypes.byref(in_blob), "StockVideoGenerator", None, None, None, 0,
+            ctypes.byref(in_blob),
+            "StockVideoGenerator",
+            None,
+            None,
+            None,
+            0,
             ctypes.byref(out_blob),
         )
     if not ok:
@@ -140,8 +149,9 @@ def _decode_secret(value: str) -> str:
 
 
 class DouyinIntegration:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, ai_models: AiModelService | None = None) -> None:
         self.settings = settings
+        self.ai_models = ai_models or AiModelService(settings)
         self.root = settings.data_dir / "integrations" / "douyin"
         self.import_root = settings.data_dir / "imports" / "douyin"
         self.config_path = self.root / "settings.json"
@@ -194,7 +204,7 @@ class DouyinIntegration:
         return {
             "X-Client-ID": configured.client_id,
             "Authorization": f"Bearer {configured.api_key}",
-            "User-Agent": "StockVideoGenerator-DouyinIntegration/0.1.12",
+            "User-Agent": "StockVideoGenerator-DouyinIntegration/0.1.13",
         }
 
     def _load_jobs(self) -> dict[str, dict[str, Any]]:
@@ -233,9 +243,7 @@ class DouyinIntegration:
 
     def _save_account_cache(self, payload: dict[str, dict[str, Any]]) -> None:
         temporary = self.accounts_path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self.accounts_path)
 
     def _cached_account(self, sec_uid: str) -> dict[str, Any] | None:
@@ -249,10 +257,16 @@ class DouyinIntegration:
         records = self._load_account_cache()
         previous = records.get(sec_uid) or {}
         previous_works = {
-            str(item.get("aweme_id") or ""): item
-            for item in previous.get("works") or []
+            str(item.get("aweme_id") or ""): item for item in previous.get("works") or []
         }
         archived = json.loads(json.dumps(account, ensure_ascii=False))
+        previous_methodology = (previous.get("portrait") or {}).get("methodology") or {}
+        if previous_methodology.get("analysis_engine"):
+            archived["portrait"] = previous["portrait"]
+        elif "portrait" in previous and "portrait" not in archived:
+            archived["portrait"] = previous["portrait"]
+        if "skill_export" in previous:
+            archived["skill_export"] = previous["skill_export"]
         archived["archive_updated_at"] = datetime.now(UTC).isoformat()
         archived["archive_storage"] = "workbench-local"
         for work in archived.get("works") or []:
@@ -267,8 +281,12 @@ class DouyinIntegration:
             if old.get("transcript_source") == "editor" and old.get("transcript_edited"):
                 _repair_work_transcript(old)
                 for key in (
-                    "transcript", "transcript_edited", "transcript_source",
-                    "transcript_revision", "transcript_updated_at", "transcript_versions",
+                    "transcript",
+                    "transcript_edited",
+                    "transcript_source",
+                    "transcript_revision",
+                    "transcript_updated_at",
+                    "transcript_versions",
                 ):
                     if key in old:
                         work[key] = old[key]
@@ -292,7 +310,8 @@ class DouyinIntegration:
         if account:
             work = next(
                 (
-                    item for item in account.get("works") or []
+                    item
+                    for item in account.get("works") or []
                     if str(item.get("aweme_id") or "") == aweme_id
                 ),
                 None,
@@ -305,7 +324,11 @@ class DouyinIntegration:
         directory = self.account_media_root / sec_uid / aweme_id
         if directory.is_dir():
             return next(
-                (path for path in directory.iterdir() if path.suffix.lower() in {".mp4", ".mov", ".webm", ".m4v"}),
+                (
+                    path
+                    for path in directory.iterdir()
+                    if path.suffix.lower() in {".mp4", ".mov", ".webm", ".m4v"}
+                ),
                 None,
             )
         return None
@@ -328,7 +351,8 @@ class DouyinIntegration:
             files = response.json()
         video = next(
             (
-                item for item in files
+                item
+                for item in files
                 if str(item.get("name") or "").lower().endswith((".mp4", ".mov", ".webm", ".m4v"))
             ),
             None,
@@ -436,9 +460,7 @@ class DouyinIntegration:
     ) -> Any:
         configured = self._configured()
         timeout_seconds = (
-            configured.job_timeout_seconds
-            if long_running
-            else configured.connect_timeout_seconds
+            configured.job_timeout_seconds if long_running else configured.connect_timeout_seconds
         )
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds),
@@ -454,9 +476,7 @@ class DouyinIntegration:
             return response.json()
 
     async def resolve_account(self, request: DouyinAccountResolveRequest) -> dict[str, Any]:
-        return await self._account_request(
-            "POST", "/resolve", payload=request.model_dump()
-        )
+        return await self._account_request("POST", "/resolve", payload=request.model_dump())
 
     async def list_accounts(self) -> list[dict[str, Any]]:
         try:
@@ -476,7 +496,7 @@ class DouyinIntegration:
         except (RuntimeError, httpx.HTTPError):
             cached = self._cached_account(sec_uid)
             if cached is None:
-                raise KeyError("账号档案不存在")
+                raise KeyError("账号档案不存在") from None
             return cached
         return await self._store_account(remote)
 
@@ -490,9 +510,7 @@ class DouyinIntegration:
         local_deleted = self._remove_cached_account(sec_uid)
         return {"deleted": remote_deleted or local_deleted, "local_deleted": local_deleted}
 
-    async def sync_account(
-        self, sec_uid: str, request: DouyinAccountSyncRequest
-    ) -> dict[str, Any]:
+    async def sync_account(self, sec_uid: str, request: DouyinAccountSyncRequest) -> dict[str, Any]:
         value = await self._account_request(
             "POST",
             f"/{sec_uid}/sync",
@@ -527,8 +545,7 @@ class DouyinIntegration:
             except (RuntimeError, httpx.HTTPError):
                 account = None
         belongs_to_account = any(
-            str(work.get("job_id") or "") == job_id
-            for work in (account or {}).get("works") or []
+            str(work.get("job_id") or "") == job_id for work in (account or {}).get("works") or []
         )
         if not belongs_to_account:
             raise KeyError("提取任务不属于当前账号")
@@ -545,54 +562,78 @@ class DouyinIntegration:
             return response.json()
 
     async def refresh_account_archive_when_jobs_finish(
-        self, sec_uid: str, job_ids: list[str], *, poll_seconds: float = 2.0
+        self, sec_uid: str, job_ids: list[str], *, poll_seconds: float = 5.0
     ) -> None:
         pending = {str(job_id) for job_id in job_ids if job_id}
         if not pending:
             return
         configured = self._configured()
         deadline = datetime.now(UTC).timestamp() + configured.job_timeout_seconds
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(configured.connect_timeout_seconds),
-            follow_redirects=False,
-        ) as client:
-            while pending and datetime.now(UTC).timestamp() < deadline:
-                finished: set[str] = set()
-                for job_id in pending:
-                    try:
-                        response = await client.get(
-                            f"{configured.base_url}/api/v1/jobs/{job_id}",
-                            headers=self._headers(configured),
-                        )
-                        response.raise_for_status()
-                        if response.json().get("status") in {
-                            "completed", "failed", "cancelled", "interrupted",
-                        }:
-                            finished.add(job_id)
-                    except httpx.HTTPError:
-                        continue
-                pending -= finished
-                if pending:
-                    import asyncio
-                    await asyncio.sleep(poll_seconds)
-        try:
-            account = await self._account_request("GET", f"/{sec_uid}")
-            await self._store_account(account)
-        except (RuntimeError, httpx.HTTPError, OSError):
-            return
+        terminal = {"completed", "failed", "cancelled", "interrupted"}
+        import asyncio
+
+        while pending and datetime.now(UTC).timestamp() < deadline:
+            try:
+                account = await self._account_request("GET", f"/{sec_uid}")
+                await self._store_account(account)
+                statuses = {
+                    str(work.get("job_id") or ""): str(work.get("processing_status") or "")
+                    for work in account.get("works") or []
+                }
+                pending = {job_id for job_id in pending if statuses.get(job_id) not in terminal}
+            except (RuntimeError, httpx.HTTPError, OSError):
+                pass
+            if pending:
+                await asyncio.sleep(poll_seconds)
 
     async def analyze_account(
         self, sec_uid: str, request: DouyinAccountAnalyzeRequest
     ) -> dict[str, Any]:
-        value = await self._account_request(
-            "POST",
-            f"/{sec_uid}/analyze",
-            payload=request.model_dump(),
-            long_running=True,
+        account = await self.get_account(sec_uid)
+        transcribed = [
+            work for work in account.get("works") or [] if str(work.get("transcript") or "").strip()
+        ][: request.sample_size]
+        if len(transcribed) < 5:
+            raise RuntimeError("至少需要 5 条完整文案才能进行 AI 风格分析")
+        analysis, model_info = await self.ai_models.analyze_creator(
+            str(account.get("nickname") or "对标账号"), transcribed
         )
-        account = await self._account_request("GET", f"/{sec_uid}")
-        await self._store_account(account)
-        return value
+        value = analysis.model_dump()
+        sample_count = len(account.get("works") or [])
+        value.update(
+            {
+                "confidence": "高" if len(transcribed) >= 20 else "中",
+                "sample_count": sample_count,
+                "transcript_count": len(transcribed),
+                "completion_ratio": round(len(transcribed) / max(sample_count, 1) * 100, 1),
+                "analysis_engine": model_info,
+            }
+        )
+        pillars = value["content_pillars"]
+        if not all(isinstance(item.get("ratio"), (int, float)) for item in pillars):
+            total_evidence = sum(max(int(item.get("evidence_count") or 1), 1) for item in pillars)
+            for item in pillars:
+                item["ratio"] = round(
+                    max(int(item.get("evidence_count") or 1), 1) / total_evidence * 100, 1
+                )
+        portrait = {
+            "generated_at": model_info["generated_at"],
+            "sample_size": sample_count,
+            "transcribed_count": len(transcribed),
+            "positioning": value["positioning"],
+            "content_pillars": pillars,
+            "top_hashtags": [],
+            "style_observations": value["author_lens"],
+            "metrics": {},
+            "representative_works": [
+                {"aweme_id": work.get("aweme_id"), "title": work.get("title")}
+                for work in transcribed[:8]
+            ],
+            "methodology": value,
+        }
+        account["portrait"] = portrait
+        self._cache_account(account)
+        return portrait
 
     async def update_account_work_transcript(
         self, sec_uid: str, aweme_id: str, text: str
@@ -606,7 +647,7 @@ class DouyinIntegration:
         except (RuntimeError, httpx.HTTPError):
             account = self._cached_account(sec_uid)
             if account is None:
-                raise KeyError("账号档案不存在")
+                raise KeyError("账号档案不存在") from None
             updated = None
             for work in account.get("works") or []:
                 if str(work.get("aweme_id") or "") != aweme_id:
@@ -614,10 +655,13 @@ class DouyinIntegration:
                 previous = str(work.get("transcript") or "").strip()
                 if previous and previous != text.strip():
                     versions = list(work.get("transcript_versions") or [])
-                    versions.append({
-                        "text": previous, "source": "editor",
-                        "saved_at": datetime.now(UTC).isoformat(),
-                    })
+                    versions.append(
+                        {
+                            "text": previous,
+                            "source": "editor",
+                            "saved_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
                     work["transcript_versions"] = versions[-10:]
                 work["transcript"] = text.strip()
                 work["transcript_edited"] = text.strip()
@@ -627,7 +671,7 @@ class DouyinIntegration:
                 updated = work
                 break
             if updated is None:
-                raise KeyError("作品不存在")
+                raise KeyError("作品不存在") from None
             self._cache_account(account)
             return updated
         account = await self._account_request("GET", f"/{sec_uid}")
@@ -635,22 +679,98 @@ class DouyinIntegration:
         return updated
 
     async def export_account_skill(self, sec_uid: str) -> tuple[bytes, str]:
-        configured = self._configured()
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(configured.job_timeout_seconds),
-            follow_redirects=False,
-        ) as client:
-            response = await client.post(
-                f"{configured.base_url}/api/v1/accounts/{sec_uid}/skill",
-                headers=self._headers(configured),
-            )
-            response.raise_for_status()
-            disposition = response.headers.get("content-disposition", "")
-            filename_match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disposition)
-            filename = filename_match.group(1) if filename_match else "benchmark-creator-skill.zip"
-            return response.content, filename
+        account = self._cached_account(sec_uid)
+        if account is None:
+            account = await self.get_account(sec_uid)
+        portrait = account.get("portrait") or {}
+        methodology = portrait.get("methodology") or {}
+        if not methodology.get("writing_workflows"):
+            raise RuntimeError("请先使用 DeepSeek 完成画像与写作方法论分析")
+        nickname = str(account.get("nickname") or "对标账号")
+        stable_id = re.sub(r"[^a-z0-9]", "", sec_uid.lower())[-10:] or "creator"
+        skill_name = f"write-original-{stable_id}-style"
+        skill_dir = self.root / "skills" / skill_name
+        refs = skill_dir / "references"
+        agents = skill_dir / "agents"
+        refs.mkdir(parents=True, exist_ok=True)
+        agents.mkdir(parents=True, exist_ok=True)
 
-    async def _account_work_video_url(self, sec_uid: str, aweme_id: str) -> tuple[DouyinRemoteSettings, str]:
+        skill_md = f"""---
+name: {skill_name}
+description: >-
+  从“{nickname}”逐字稿提炼深层写作方法，创作原创中文短视频人生叙事、
+  身份叙事和分级盘点文案。用于迁移沉浸视角、感官细节、人生压缩、
+  现实磨损、情绪回环和克制收束等机制时；不得复制原句、比喻或案例顺序。
+---
+
+# 原创写作工作流
+
+1. 必须读取 `references/writing-engine.md`，根据题材选择对应栏目母体。
+2. 必须读取 `references/rewrite-checklist.md`，在交付前完成逐项重写检查。
+3. 先建立事实材料表，再选择物件、感官、动作和人生节点。
+   资料不足时明确采用虚构人物，不得捏造真实人物事实。
+4. 完整稿先写结构骨架，再写画面，最后压低直接抒情；不得从金句开始反推故事。
+5. 默认输出约 3 分钟的干净中文口播稿。用户指定时长时，按每分钟约 260–320 个汉字调整。
+6. 只迁移写作机制，保持主题、事实、人物、场景、比喻和收束表达原创。
+"""
+        workflow_lines = []
+        for flow in methodology.get("writing_workflows") or []:
+            workflow_lines.append(f"## {flow.get('name')}\n\n适用：{flow.get('use_when')}\n")
+            workflow_lines.extend(
+                f"{index}. {step}" for index, step in enumerate(flow.get("steps") or [], 1)
+            )
+            required = "、".join(flow.get("required_elements") or [])
+            workflow_lines.append(f"\n必备元素：{required}\n")
+        engine_md = (
+            "# 写作引擎\n\n## 作者视角\n\n"
+            + "\n".join(f"- {item}" for item in methodology.get("author_lens") or [])
+            + "\n\n## 细节选择\n\n"
+            + "\n".join(f"- {item}" for item in methodology.get("detail_selection") or [])
+            + "\n\n## 情绪推进\n\n"
+            + "\n".join(f"- {item}" for item in methodology.get("emotional_arc") or [])
+            + "\n\n## 语言执行\n\n"
+            + "\n".join(f"- {item}" for item in methodology.get("language_mechanics") or [])
+            + "\n\n"
+            + "\n".join(workflow_lines)
+        )
+        checklist_md = (
+            "# 重写检查\n\n"
+            + "\n".join(f"- [ ] {item}" for item in methodology.get("rewrite_checks") or [])
+            + "\n\n# 原创边界\n\n"
+            + "\n".join(f"- {item}" for item in methodology.get("originality_rules") or [])
+        )
+        (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+        (refs / "writing-engine.md").write_text(engine_md, encoding="utf-8")
+        (refs / "rewrite-checklist.md").write_text(checklist_md, encoding="utf-8")
+        (refs / "analysis.json").write_text(
+            json.dumps(methodology, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (agents / "openai.yaml").write_text(
+            f'''interface:
+  display_name: "{nickname}式原创写作"
+  short_description: "以深层叙事机制创作原创短视频文案"
+  default_prompt: "请使用 ${skill_name} 创作一篇约三分钟的原创中文口播稿。"
+''',
+            encoding="utf-8",
+        )
+        archive = self.root / "skills" / f"{skill_name}.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            for path in skill_dir.rglob("*"):
+                if path.is_file():
+                    output.write(path, Path(skill_name) / path.relative_to(skill_dir))
+        account["skill_export"] = {
+            "name": skill_name,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "confidence": methodology.get("confidence"),
+            "transcript_count": methodology.get("transcript_count"),
+            "model": (methodology.get("analysis_engine") or {}).get("model"),
+        }
+        self._cache_account(account)
+        return archive.read_bytes(), archive.name
+
+    async def _account_work_video_url(
+        self, sec_uid: str, aweme_id: str
+    ) -> tuple[DouyinRemoteSettings, str]:
         account = await self.get_account(sec_uid)
         work = next(
             (item for item in account.get("works") or [] if str(item.get("aweme_id")) == aweme_id),
@@ -674,7 +794,8 @@ class DouyinIntegration:
             files = response.json()
         video = next(
             (
-                item for item in files
+                item
+                for item in files
                 if str(item.get("name") or "").lower().endswith((".mp4", ".mov", ".webm", ".m4v"))
             ),
             None,
@@ -718,8 +839,12 @@ class DouyinIntegration:
             result = {
                 key.lower(): value
                 for key, value in response.headers.items()
-                if key.lower() in {
-                    "content-type", "content-length", "content-range", "accept-ranges",
+                if key.lower()
+                in {
+                    "content-type",
+                    "content-length",
+                    "content-range",
+                    "accept-ranges",
                 }
             }
         result["accept-ranges"] = "bytes"
@@ -831,9 +956,7 @@ class DouyinIntegration:
             raise KeyError("文件不存在")
         configured = self._configured()
         mapping = self._mapping(local_job_id)
-        url = (
-            f"{configured.base_url}/api/v1/jobs/{mapping['remote_job_id']}/files/{token}"
-        )
+        url = f"{configured.base_url}/api/v1/jobs/{mapping['remote_job_id']}/files/{token}"
         return configured, url
 
     async def file_headers(self, local_job_id: str, token: str) -> dict[str, str]:
@@ -898,8 +1021,7 @@ class DouyinIntegration:
                 if existing:
                     headers["Range"] = f"bytes={existing}-"
                 remote_url = (
-                    f"{configured.base_url}/api/v1/jobs/"
-                    f"{snapshot['remote_job_id']}/files/{token}"
+                    f"{configured.base_url}/api/v1/jobs/{snapshot['remote_job_id']}/files/{token}"
                 )
                 async with client.stream("GET", remote_url, headers=headers) as response:
                     if existing and response.status_code == 200:

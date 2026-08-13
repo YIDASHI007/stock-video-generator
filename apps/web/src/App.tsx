@@ -16,7 +16,12 @@ import {PreviewPage} from "./pages/PreviewPage";
 import {PublishCalendarPage} from "./pages/PublishCalendarPage";
 import {PublishPage} from "./pages/PublishPage";
 import {PublishRecordsPage} from "./pages/PublishRecordsPage";
-import {SettingsPage} from "./pages/SettingsPage";
+import {
+  AiModelSettingsPage,
+  DataSourcesSettingsPage,
+  OptimizationSettingsPage,
+  SystemConfigPage,
+} from "./pages/SettingsPage";
 import {SimulationPage} from "./pages/SimulationPage";
 import {SystemLogsPage} from "./pages/SystemLogsPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
@@ -42,7 +47,11 @@ export const App: React.FC = () => (
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="analytics/benchmarks" element={<BenchmarkAccountsPage />} />
         <Route path="analytics/benchmarks/:secUid/works/:awemeId" element={<WorkArchivePage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings" element={<Navigate to="/system/data-sources" replace />} />
+        <Route path="system/data-sources" element={<DataSourcesSettingsPage />} />
+        <Route path="system/ai-models" element={<AiModelSettingsPage />} />
+        <Route path="system/config" element={<SystemConfigPage />} />
+        <Route path="system/optimization" element={<OptimizationSettingsPage />} />
         <Route path="system/logs" element={<SystemLogsPage />} />
         <Route path="system/backups" element={<BackupsPage />} />
         <Route path="simulations/:simulationId" element={<SimulationPage />} />
@@ -52,7 +61,7 @@ export const App: React.FC = () => (
         />
         {/* 已废弃路由：重定向避免死链 */}
         <Route path="outputs" element={<Navigate to="/assets" replace />} />
-        <Route path="health" element={<Navigate to="/settings" replace />} />
+        <Route path="health" element={<Navigate to="/system/data-sources" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

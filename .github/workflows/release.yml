@@ -1,27 +1,21 @@
-name: Build Windows release
+name: Publish source release
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version, for example 0.1.1"
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  windows-release:
+  source-release:
     runs-on: windows-latest
-    env:
-      CI: "true"
-      RELEASE_REPOSITORY: "YIDASHI007/stock-video-generator-releases"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -36,71 +30,31 @@ jobs:
         with:
           version: "11.9.0"
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Install build dependencies
+      - name: Install test dependencies
         shell: pwsh
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
-          .\.venv\Scripts\python.exe -m pip install -e ".[dev,build]"
-          dotnet tool install --global vpk --version 1.2.0
+          .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+          pnpm install --frozen-lockfile
 
-      - name: Resolve version
-        id: version
+      - name: Verify source release
         shell: pwsh
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version }}"
-          } else {
-            $version = "${{ github.ref_name }}".TrimStart("v")
-          }
-          "value=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Test and package
-        shell: pwsh
-        run: |
+          .\.venv\Scripts\python.exe -m ruff check apps/api/src
           .\.venv\Scripts\python.exe -m pytest -q
-          .\scripts\build-windows-release.ps1 `
-            -Version "${{ steps.version.outputs.value }}" `
-            -UpdateRepoUrl "https://github.com/${{ env.RELEASE_REPOSITORY }}" `
-            -UpdateRepoToken "${{ secrets.RELEASE_REPO_TOKEN }}" `
-            -RequireDelta $true
+          pnpm -r test
 
-      - name: Verify incremental update assets
-        shell: pwsh
-        run: |
-          $releaseDir = "build/windows-${{ steps.version.outputs.value }}/Releases"
-          $version = "${{ steps.version.outputs.value }}"
-          $full = Get-Item "$releaseDir/StockVideoGenerator-$version-full.nupkg"
-          $delta = Get-Item "$releaseDir/StockVideoGenerator-$version-delta.nupkg"
-          if ($delta.Length -ge $full.Length) {
-            throw "Delta package must be smaller than the full package."
-          }
-          Write-Host "Full:  $([math]::Round($full.Length / 1MB, 1)) MB"
-          Write-Host "Delta: $([math]::Round($delta.Length / 1MB, 1)) MB"
-
-      - name: Upload workflow artifact
-        # The public GitHub Release below is the update source of record. A full
-        # Actions artifact is only a redundant CI backup, so a temporary account
-        # storage-quota exhaustion must not block publishing the signed-off build.
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: StockVideoGenerator-${{ steps.version.outputs.value }}-windows
-          path: build/windows-${{ steps.version.outputs.value }}/Releases/*
-          if-no-files-found: error
-
-      - name: Publish GitHub Release
+      - name: Publish source release notes
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            build/windows-${{ steps.version.outputs.value }}/Releases/* `
-            --repo "${{ env.RELEASE_REPOSITORY }}" `
-            --generate-notes `
-            --title "社媒工作台 ${{ steps.version.outputs.value }}"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $notes = "docs/RELEASE_NOTES_$version.md"
+          if (Test-Path -LiteralPath $notes) {
+            gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" --title "社媒工作台 ${{ github.ref_name }}" --notes-file $notes
+          } else {
+            gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" --title "社媒工作台 ${{ github.ref_name }}" --generate-notes
+          }

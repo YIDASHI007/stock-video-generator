@@ -336,7 +336,7 @@ const SidebarHealth: React.FC = () => {
   const {data} = usePolling(loader, 60_000);
   const ok = data ? data.some((item) => item.available) : null;
   return (
-    <Link to="/settings" className="sidebar-health">
+    <Link to="/system/data-sources" className="sidebar-health">
       <span
         className={`health-dot ${ok === null ? "unknown" : ok ? "ok" : "bad"}`}
       />
@@ -440,7 +440,10 @@ const navGroups: NavGroup[] = [
     icon: Settings2,
     match: (path) => path.startsWith("/settings") || path.startsWith("/system"),
     items: [
-      {to: "/settings", label: "系统设置", description: "数据源与生产参数", icon: Settings2},
+      {to: "/system/data-sources", label: "数据源", description: "行情连接与可用状态", icon: Database},
+      {to: "/system/ai-models", label: "AI 模型", description: "模型、密钥与连接测试", icon: Sparkles},
+      {to: "/system/config", label: "系统配置", description: "运行环境与服务信息", icon: Settings2},
+      {to: "/system/optimization", label: "优化策略", description: "自动选题与生产规则", icon: ListChecks},
       {to: "/system/logs", label: "运行日志", description: "诊断与错误信息", icon: Logs},
       {to: "/system/backups", label: "备份与更新", description: "数据库与版本状态", icon: Database},
     ],
