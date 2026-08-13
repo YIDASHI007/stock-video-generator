@@ -1,11 +1,12 @@
 import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Link} from "react-router-dom";
-import {CalendarClock, ChevronDown, Clock3, ShieldCheck, SlidersHorizontal} from "lucide-react";
+import {CalendarClock, ChevronDown, Clock3, KeyRound, ShieldCheck, SlidersHorizontal} from "lucide-react";
 import {siTiktok, siWechat, siXiaohongshu, type SimpleIcon} from "simple-icons";
 
 import {
   API_BASE,
   api,
+  type ExtractorCookieSync,
   type PublishAccount,
   type PublishLoginStatus,
   type SocialPlatform,
@@ -276,6 +277,26 @@ export const AccountsPage: React.FC = () => {
     }
   };
 
+  const syncExtractorCookies = async (account: PublishAccount) => {
+    setAccountBusy(account.account_id, true);
+    setActionError(null);
+    try {
+      const result = await api<ExtractorCookieSync>(
+        `/api/accounts/${account.account_id}/extractor-cookies`,
+        {method: "POST"},
+      );
+      if (!result.ready) {
+        setActionError(`凭证已同步，但仍缺少：${result.missing.join("、")}`);
+      } else {
+        window.alert(`抓取凭证已同步，共 ${result.cookie_count} 项。现在可以解析对标账号。`);
+      }
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAccountBusy(account.account_id, false);
+    }
+  };
+
   const removeAccount = async (account: PublishAccount) => {
     const prompt = account.enabled
       ? `解绑“${account.display_name}”？本机会清除该账号的登录会话，解绑后可再次删除账号。`
@@ -518,6 +539,16 @@ export const AccountsPage: React.FC = () => {
                   >
                     <TrashIcon size={15} />
                   </button>
+                  {account.platform === "douyin" && account.auth_status === "logged_in" ? (
+                    <button
+                      className="mini-button account-cookie-action"
+                      disabled={isBusy || !account.enabled}
+                      onClick={() => void syncExtractorCookies(account)}
+                      title="把此账号的抖音登录凭证安全同步到本机抓取器"
+                    >
+                      <KeyRound size={12}/> 同步抓取凭证
+                    </button>
+                  ) : null}
                 </div>
               </article>
             );

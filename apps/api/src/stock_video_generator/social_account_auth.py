@@ -389,3 +389,27 @@ class SocialAccountAuthenticator:
         finally:
             await context.close()
             await playwright.stop()
+
+    async def export_cookies(
+        self,
+        platform: SocialPlatform,
+        profile_dir: Path,
+    ) -> list[dict[str, object]]:
+        """Read platform cookies through the saved browser profile without exposing them to UI."""
+        if platform != "douyin":
+            raise ValueError("仅抖音账号支持同步抓取凭证")
+        if not profile_dir.is_dir() or not any(profile_dir.iterdir()):
+            raise ValueError("账号浏览器会话不存在，请先扫码登录")
+        playwright, context = await self._open_context(profile_dir, headless=True)
+        try:
+            cookies = await context.cookies(["https://www.douyin.com", "https://creator.douyin.com"])
+            return [
+                cookie
+                for cookie in cookies
+                if str(cookie.get("domain") or "").lstrip(".").endswith("douyin.com")
+                and cookie.get("name")
+                and cookie.get("value")
+            ]
+        finally:
+            await context.close()
+            await playwright.stop()

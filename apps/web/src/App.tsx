@@ -5,6 +5,7 @@ import {Layout} from "./components";
 import {CreatePage} from "./pages/CreatePage";
 import {AccountsPage} from "./pages/AccountsPage";
 import {AnalyticsPage} from "./pages/AnalyticsPage";
+import {BenchmarkAccountsPage} from "./pages/BenchmarkAccountsPage";
 import {BackupsPage} from "./pages/BackupsPage";
 import {ContentLibraryPage} from "./pages/ContentLibraryPage";
 import {DouyinImportPage} from "./pages/DouyinImportPage";
@@ -20,6 +21,7 @@ import {SimulationPage} from "./pages/SimulationPage";
 import {SystemLogsPage} from "./pages/SystemLogsPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
 import {WorkflowsPage} from "./pages/WorkflowsPage";
+import {WorkArchivePage} from "./pages/WorkArchivePage";
 
 export const App: React.FC = () => (
   <BrowserRouter>
@@ -38,6 +40,8 @@ export const App: React.FC = () => (
         <Route path="publish/records" element={<PublishRecordsPage />} />
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="analytics/benchmarks" element={<BenchmarkAccountsPage />} />
+        <Route path="analytics/benchmarks/:secUid/works/:awemeId" element={<WorkArchivePage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="system/logs" element={<SystemLogsPage />} />
         <Route path="system/backups" element={<BackupsPage />} />
