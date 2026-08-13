@@ -21,18 +21,19 @@ import psutil
 
 from stock_video_generator import __version__
 
-BACKGROUND = "#081017"
-SURFACE = "#0e1922"
-SURFACE_RAISED = "#12232d"
-LINE = "#213744"
-TEXT = "#f3f8f6"
-MUTED = "#7f98a2"
-PURPLE = "#a875ff"
-GREEN = "#2ee6a6"
+BACKGROUND = "#0c111b"
+SURFACE = "#151d2a"
+SURFACE_RAISED = "#1a2433"
+LINE = "#2a374a"
+TEXT = "#eef2fb"
+MUTED = "#91a0b5"
+PURPLE = "#7185ff"
+GREEN = "#31c48d"
 YELLOW = "#f1c66d"
 RED = "#ff7180"
 
 UI_FONT = "Microsoft YaHei UI"
+DISPLAY_NAME = "社媒工作台"
 ICON_FONT = "Segoe Fluent Icons"
 ICON_CHECK = "\ue73e"
 ICON_ERROR = "\ue711"
@@ -578,7 +579,7 @@ class LauncherWindow:
         self.mode = _runtime_mode(runtime_dir)
 
         self.root = Tk()
-        self.root.title(f"股票视频工作台 · v{__version__}")
+        self.root.title(f"{DISPLAY_NAME} · v{__version__}")
         self.window_icon = PhotoImage(file=str(_asset_path("launch-center-icon.png")))
         self.root.iconphoto(True, self.window_icon)
         self.root.configure(background=LINE)
@@ -623,14 +624,14 @@ class LauncherWindow:
         ).place(x=24, y=13)
         Label(
             title_bar,
-            text="股票视频工作台",
+            text=DISPLAY_NAME,
             foreground=TEXT,
             background=BACKGROUND,
             font=(UI_FONT, 14, "bold"),
         ).place(x=86, y=16)
         Label(
             title_bar,
-            text="LOCAL PRODUCTION CONTROL",
+            text="SOCIAL MEDIA OPERATIONS",
             foreground=MUTED,
             background=BACKGROUND,
             font=("Consolas", 8),
@@ -673,14 +674,14 @@ class LauncherWindow:
 
         Label(
             stage,
-            text="启动检查",
+            text="正在准备工作空间",
             foreground=TEXT,
             background=BACKGROUND,
             font=(UI_FONT, 10, "bold"),
         ).place(x=38, y=91)
         Label(
             stage,
-            text="依次确认服务与生产环境",
+            text="服务、内容引擎与更新状态",
             foreground=MUTED,
             background=BACKGROUND,
             font=(UI_FONT, 8),
@@ -738,7 +739,7 @@ class LauncherWindow:
         self.ready_actions = Frame(stage, background=BACKGROUND)
         self.open_workbench_button = Button(
             self.ready_actions,
-            text="打开工作台  →",
+            text="进入社媒工作台  →",
             command=self._open_workbench_from_center,
             background=GREEN,
             activebackground="#5bf0b9",
@@ -1174,7 +1175,7 @@ class LauncherWindow:
         else:
             self.step_progress.set_step(index + 1)
         self.root.after(
-            220,
+            90,
             lambda: self._complete_step(
                 state,
                 message,
@@ -1189,19 +1190,19 @@ class LauncherWindow:
         self.status_text.set(message)
         self.status_label.set_color(color)
         self.status_indicator.set_result(state)
-        self.root.after(380, lambda: self._animate_exit(0, next_step))
+        self.root.after(150, lambda: self._animate_exit(0, next_step))
 
     def _animate_exit(self, frame: int, next_step: Callable[[], None]) -> None:
         if not self._motion_enabled:
             self.status_row.place_forget()
             self.root.after(60, next_step)
             return
-        if frame >= 8:
+        if frame >= 5:
             self.status_row.place_forget()
             self.root.after(60, next_step)
             return
         self.status_row.place_configure(y=self.status_y - frame * 3)
-        self.root.after(22, lambda: self._animate_exit(frame + 1, next_step))
+        self.root.after(16, lambda: self._animate_exit(frame + 1, next_step))
 
     def _finish_sequence(self) -> None:
         if self._blocking_errors:
@@ -1225,7 +1226,7 @@ class LauncherWindow:
         self.status_indicator.set_result("ok")
         self.status_row.place(relx=0.5, y=self.status_y, anchor="n")
         if self._auto_open_after_checks:
-            self.root.after(650, self._open_workbench)
+            self.root.after(260, self._open_workbench)
         else:
             self._show_ready_actions()
 
@@ -1483,7 +1484,7 @@ class LauncherWindow:
                 MenuItem(self._tray_version_text, None, enabled=False),
                 MenuItem(self._tray_service_text, None, enabled=False),
                 Menu.SEPARATOR,
-                MenuItem("打开工作台", self._tray_open, default=True),
+                MenuItem("打开社媒工作台", self._tray_open, default=True),
                 MenuItem("显示启动中心", self._tray_show_center),
                 MenuItem("重启后台服务", self._tray_restart_service),
                 MenuItem("检查版本更新", self._tray_check_update),
@@ -1498,7 +1499,7 @@ class LauncherWindow:
             self.tray_icon = Icon(
                 "stock-video-workbench",
                 tray_image,
-                f"股票视频工作台 v{__version__} · 端口 {self.port}",
+                f"{DISPLAY_NAME} v{__version__} · 端口 {self.port}",
                 menu,
             )
             self.tray_icon.run_detached()
@@ -1515,7 +1516,7 @@ class LauncherWindow:
 
     def _tray_version_text(self, _item: Any = None) -> str:
         mode = "开发版" if self.mode == "development" else "桌面版"
-        return f"股票视频工作台 v{__version__} · {mode}"
+        return f"{DISPLAY_NAME} v{__version__} · {mode}"
 
     def _tray_service_text(self, _item: Any = None) -> str:
         if self._service_restart_busy:
@@ -1536,7 +1537,7 @@ class LauncherWindow:
         if self.tray_icon is None:
             return
         try:
-            self.tray_icon.notify(message, "股票视频工作台")
+            self.tray_icon.notify(message, DISPLAY_NAME)
         except Exception:
             pass
 

@@ -3,15 +3,18 @@ import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
+  BarChart3,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
   Clock3,
   FileVideo2,
   GitBranch,
-  Play,
+  Lightbulb,
   Radio,
   Rocket,
+  Send,
+  Sparkles,
   TrendingUp,
   UsersRound,
 } from "lucide-react";
@@ -145,17 +148,25 @@ export const DashboardPage: React.FC = () => {
 
       <header className="ops-hero">
         <div>
-          <span className="ops-kicker"><Radio size={13} /> 运营状态实时同步</span>
-          <h1>工作空间</h1>
-          <p>系统运行{failedJobs.length + failedPublishes.length === 0 ? "稳定" : "存在待处理事项"}，今日已完成 <strong>{(outputs ?? []).filter((item) => inRange(item.created_at, "today")).length}</strong> 条内容。</p>
+          <span className="ops-kicker"><Radio size={13} /> 社媒运营状态实时同步</span>
+          <h1>今天，从哪里开始？</h1>
+          <p>从策划、制作到多平台发布统一推进。系统运行{failedJobs.length + failedPublishes.length === 0 ? "稳定" : "存在待处理事项"}，今日已完成 <strong>{(outputs ?? []).filter((item) => inRange(item.created_at, "today")).length}</strong> 条内容。</p>
         </div>
         <div className="ops-actions">
           <div className="range-switch" aria-label="统计范围">
             {RANGE_OPTIONS.map((option) => <button key={option.key} type="button" className={range === option.key ? "active" : ""} onClick={() => setRange(option.key)}>{option.label}</button>)}
           </div>
-          <Link to="/workbench" className="button primary"><Play size={15} fill="currentColor" /> 开始生产</Link>
+          <Link to="/workbench" className="button primary"><Sparkles size={15} /> 创建内容</Link>
         </div>
       </header>
+
+      <nav className="ops-journey" aria-label="社媒运营工作流">
+        <Link to="/analytics/benchmarks"><span className="journey-icon"><Lightbulb size={18}/></span><span><small>01 · 洞察</small><strong>找选题与对标</strong><em>账号画像、爆款文案</em></span><ChevronRight size={15}/></Link>
+        <Link to="/workbench"><span className="journey-icon"><Sparkles size={18}/></span><span><small>02 · 制作</small><strong>生成一条内容</strong><em>工作流、脚本与成片</em></span><ChevronRight size={15}/></Link>
+        <Link to="/assets"><span className="journey-icon"><FileVideo2 size={18}/></span><span><small>03 · 管理</small><strong>整理内容资产</strong><em>素材、成片与元数据</em></span><ChevronRight size={15}/></Link>
+        <Link to="/publish"><span className="journey-icon"><Send size={18}/></span><span><small>04 · 分发</small><strong>安排多平台发布</strong><em>{waitingPublish} 条内容等待确认</em></span><ChevronRight size={15}/></Link>
+        <Link to="/analytics"><span className="journey-icon"><BarChart3 size={18}/></span><span><small>05 · 复盘</small><strong>查看运营表现</strong><em>产能、成功率与分布</em></span><ArrowUpRight size={15}/></Link>
+      </nav>
 
       <section className="ops-metrics">
         <article><span>进行中工作流</span><strong>{activeJobs}</strong><small><Activity size={13}/> 自动生产 {pipeline?.enabled ? "已开启" : "已暂停"}</small></article>
@@ -168,7 +179,7 @@ export const DashboardPage: React.FC = () => {
       <div className="ops-grid">
         <div className="ops-main-column">
           <section className="ops-panel trend-panel">
-            <div className="ops-panel-head"><div><span className="panel-kicker">CONTENT OUTPUT</span><h2>内容产出趋势</h2></div><div className="panel-total"><strong>{filteredOutputs.length}</strong><span>条成片</span></div></div>
+            <div className="ops-panel-head"><div><span className="panel-kicker">CONTENT OUTPUT</span><h2>社媒内容产出</h2></div><div className="panel-total"><strong>{filteredOutputs.length}</strong><span>条成片</span></div></div>
             <TrendChart outputs={outputs ?? []} range={range} />
             <div className="trend-legend"><span><i className="legend-emerald"/> 自动生产成片</span><span>数据来自本机真实输出记录</span></div>
           </section>

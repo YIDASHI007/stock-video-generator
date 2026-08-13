@@ -103,4 +103,4 @@ jobs:
             build/windows-${{ steps.version.outputs.value }}/Releases/* `
             --repo "${{ env.RELEASE_REPOSITORY }}" `
             --generate-notes `
-            --title "股票视频工作台 ${{ steps.version.outputs.value }}"
+            --title "社媒工作台 ${{ steps.version.outputs.value }}"

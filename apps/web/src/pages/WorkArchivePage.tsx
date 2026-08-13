@@ -8,7 +8,7 @@ import {
 import {
   api, douyinAccountWorkVideoUrl, type DouyinAccountJob, type DouyinBenchmarkAccount, type DouyinWork,
 } from "../api";
-import {ErrorNotice} from "../components";
+import {ErrorNotice, SuccessNotice} from "../components";
 import "./WorkArchivePage.css";
 
 const accountApi = "/api/integrations/douyin/accounts";
@@ -225,7 +225,7 @@ export const WorkArchivePage: React.FC = () => {
 
   return <div className="page work-review-page">
     {error ? <ErrorNotice message={error}/> : null}
-    {notice ? <div className="notice ok-notice review-notice"><Check size={15}/>{notice}</div> : null}
+    {notice ? <SuccessNotice message={notice} className="review-notice"/> : null}
 
     <header className="review-command-bar">
       <button type="button" className="review-back" onClick={() => navigate("/analytics/benchmarks")}>
