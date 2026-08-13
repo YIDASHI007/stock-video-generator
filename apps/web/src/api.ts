@@ -526,6 +526,14 @@ export type DouyinIntegrationSettings = {
   api_key_hint: string | null;
 };
 
+export type ExtractorCookieSync = {
+  account_id: string;
+  status: "synced";
+  cookie_count: number;
+  ready: boolean;
+  missing: string[];
+};
+
 export type DouyinRemoteFile = {
   name: string;
   path: string;
@@ -581,6 +589,95 @@ export type DouyinImportedAsset = {
   video_name?: string | null;
 };
 
+export type DouyinWork = {
+  aweme_id: string;
+  url: string;
+  title: string;
+  description?: string;
+  published_at?: string;
+  duration?: number;
+  cover_url?: string;
+  hashtags?: string[];
+  statistics?: {play?: number; like?: number; comment?: number; share?: number; collect?: number};
+  job_id?: string;
+  processing_status?: string;
+  transcript?: string;
+  transcript_raw?: string;
+  transcript_edited?: string;
+  transcript_source?: "speech_to_text" | "editor" | string;
+  transcript_updated_at?: string;
+  transcript_revision?: number;
+  transcript_versions?: Array<{text: string; source: string; saved_at: string}>;
+  segments?: Array<{start: number; end: number; text: string}>;
+  detected_language?: string;
+  language_probability?: number;
+  processing_error?: string;
+};
+
+export type DouyinAccountJob = {
+  id: string;
+  status: "queued" | "resolving" | "downloading" | "transcribing" | "packaging" | "completed" | "failed" | "cancelled" | "interrupted" | string;
+  stage?: string;
+  progress?: number;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type DouyinMethodology = {
+  confidence: string;
+  sample_count: number;
+  transcript_count: number;
+  completion_ratio: number;
+  hook_patterns: Array<{name: string; count: number}>;
+  narrative_structures: Array<{name: string; count: number}>;
+  language_style: {average_sentence_chars: number; estimated_chars_per_second: number; short_line_ratio: number};
+  opening_examples: string[];
+  ending_examples: string[];
+  evidence: Array<{aweme_id: string; title: string; url: string; excerpt: string; like: number}>;
+  originality_rules: string[];
+};
+
+export type DouyinAccountPortrait = {
+  generated_at: string;
+  sample_size: number;
+  transcribed_count: number;
+  positioning: string;
+  content_pillars: Array<{name: string; count: number; ratio: number}>;
+  top_hashtags: Array<{name: string; count: number}>;
+  style_observations: string[];
+  metrics: {average_duration: number; question_hook_ratio: number; number_hook_ratio: number};
+  representative_works: Array<{aweme_id: string; title: string; url: string; like: number; comment: number}>;
+  methodology?: DouyinMethodology;
+};
+
+export type DouyinBenchmarkAccount = {
+  sec_uid: string;
+  uid?: string;
+  douyin_id?: string;
+  nickname: string;
+  signature?: string;
+  avatar_url?: string;
+  follower_count?: number;
+  following_count?: number;
+  total_favorited?: number;
+  aweme_count?: number;
+  source_url?: string;
+  works?: DouyinWork[];
+  total_stored?: number;
+  new_count?: number;
+  last_synced_at?: string;
+  portrait?: DouyinAccountPortrait;
+  skill_export?: {name: string; generated_at: string; confidence?: string; transcript_count?: number};
+};
+
+export type DouyinAccountResolveResult = {
+  match: "exact" | "candidates";
+  warning?: string;
+  account?: DouyinBenchmarkAccount;
+  candidates?: DouyinBenchmarkAccount[];
+};
+
 export const douyinFileUrl = (localJobId: string, remoteUrl: string): string => {
   const token = remoteUrl.split("/").pop() ?? "";
   return `${API_BASE}/api/integrations/douyin/jobs/${localJobId}/files/${token}`;
@@ -588,3 +685,6 @@ export const douyinFileUrl = (localJobId: string, remoteUrl: string): string => 
 
 export const douyinImportedVideoUrl = (sourceId: string): string =>
   `${API_BASE}/api/integrations/douyin/imports/${encodeURIComponent(sourceId)}/video`;
+
+export const douyinAccountWorkVideoUrl = (secUid: string, awemeId: string): string =>
+  `${API_BASE}/api/integrations/douyin/accounts/${encodeURIComponent(secUid)}/works/${encodeURIComponent(awemeId)}/video`;

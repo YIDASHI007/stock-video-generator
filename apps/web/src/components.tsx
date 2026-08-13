@@ -32,6 +32,7 @@ import {
   Sparkles,
   UploadCloud,
   UsersRound,
+  UserSearch,
   Workflow,
   X,
 } from "lucide-react";
@@ -424,6 +425,7 @@ const navGroups: NavGroup[] = [
     icon: BarChart3,
     match: (path) => path.startsWith("/analytics"),
     items: [
+      {to: "/analytics/benchmarks", label: "对标账号", description: "批量抓取、文案与风格画像", icon: UserSearch},
       {to: "/analytics", label: "运营分析", description: "产能、成功率与分布", icon: BarChart3},
     ],
   },

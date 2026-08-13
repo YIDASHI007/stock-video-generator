@@ -16,7 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, status
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,10 @@ from stock_video_generator.database import (
     TopicRecord,
 )
 from stock_video_generator.douyin_integration import (
+    DouyinAccountAnalyzeRequest,
+    DouyinAccountBatchRequest,
+    DouyinAccountResolveRequest,
+    DouyinAccountSyncRequest,
     DouyinExtractRequest,
     DouyinIntegration,
     DouyinSettingsUpdate,
@@ -142,10 +146,15 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     policy_store = PolicyStore(settings.data_dir / "pipeline_policy.json")
     pipeline = PipelineManager(settings, database, jobs, selector, policy_store)
     publishing = PublishingService(settings, database)
-    publish_manager = PublishManager(settings, database, publishing)
+    douyin_integration = DouyinIntegration(settings)
+    publish_manager = PublishManager(
+        settings,
+        database,
+        publishing,
+        extractor_cookie_sync=douyin_integration.sync_browser_cookies,
+    )
     publish_batches = PublishBatchService(database, publishing, publish_manager)
     publish_batch_manager = PublishBatchManager(database, publishing, publish_manager)
-    douyin_integration = DouyinIntegration(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -425,6 +434,165 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             media_type="video/mp4",
             filename=video.name,
             content_disposition_type="inline",
+        )
+
+    async def _douyin_account_call(awaitable):
+        try:
+            return await awaitable
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = f"远程账号服务请求失败（HTTP {exc.response.status_code}）"
+            try:
+                payload = exc.response.json()
+                detail = str(payload.get("detail") or payload.get("message") or detail)
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=503, detail=f"无法连接远程账号服务：{exc}") from exc
+
+    @app.post("/api/integrations/douyin/accounts/resolve")
+    async def resolve_douyin_account(
+        request: DouyinAccountResolveRequest,
+    ) -> dict[str, object]:
+        return await _douyin_account_call(douyin_integration.resolve_account(request))
+
+    @app.get("/api/integrations/douyin/accounts")
+    async def list_douyin_accounts() -> list[dict[str, object]]:
+        return await _douyin_account_call(douyin_integration.list_accounts())
+
+    @app.post("/api/integrations/douyin/accounts/{sec_uid}")
+    async def save_douyin_account(
+        sec_uid: str, account: dict[str, object]
+    ) -> dict[str, object]:
+        if str(account.get("sec_uid") or "") != sec_uid:
+            raise HTTPException(status_code=422, detail="账号标识不一致")
+        return await _douyin_account_call(
+            douyin_integration.save_account(sec_uid, account)
+        )
+
+    @app.get("/api/integrations/douyin/accounts/{sec_uid}")
+    async def get_douyin_account(sec_uid: str) -> dict[str, object]:
+        return await _douyin_account_call(douyin_integration.get_account(sec_uid))
+
+    @app.delete("/api/integrations/douyin/accounts/{sec_uid}")
+    async def delete_douyin_account(sec_uid: str) -> dict[str, object]:
+        return await _douyin_account_call(douyin_integration.delete_account(sec_uid))
+
+    @app.post("/api/integrations/douyin/accounts/{sec_uid}/sync")
+    async def sync_douyin_account(
+        sec_uid: str, request: DouyinAccountSyncRequest
+    ) -> dict[str, object]:
+        return await _douyin_account_call(
+            douyin_integration.sync_account(sec_uid, request)
+        )
+
+    @app.post("/api/integrations/douyin/accounts/{sec_uid}/batch")
+    async def batch_douyin_account(
+        sec_uid: str, request: DouyinAccountBatchRequest
+    ) -> dict[str, object]:
+        result = await _douyin_account_call(
+            douyin_integration.batch_account(sec_uid, request)
+        )
+        job_ids = [
+            str(item.get("job_id") or item.get("id") or "")
+            for item in result.get("jobs", [])
+            if isinstance(item, dict)
+        ]
+        if job_ids:
+            asyncio.create_task(
+                douyin_integration.refresh_account_archive_when_jobs_finish(
+                    sec_uid, job_ids
+                )
+            )
+        return result
+
+    @app.get("/api/integrations/douyin/accounts/{sec_uid}/jobs/{job_id}")
+    async def get_douyin_account_job(sec_uid: str, job_id: str) -> dict[str, object]:
+        return await _douyin_account_call(
+            douyin_integration.get_account_job(sec_uid, job_id)
+        )
+
+    @app.post("/api/integrations/douyin/accounts/{sec_uid}/analyze")
+    async def analyze_douyin_account(
+        sec_uid: str, request: DouyinAccountAnalyzeRequest
+    ) -> dict[str, object]:
+        return await _douyin_account_call(
+            douyin_integration.analyze_account(sec_uid, request)
+        )
+
+    @app.put(
+        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/transcript"
+    )
+    async def update_douyin_account_work_transcript(
+        sec_uid: str, aweme_id: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="文案不能为空")
+        return await _douyin_account_call(
+            douyin_integration.update_account_work_transcript(sec_uid, aweme_id, text)
+        )
+
+    @app.get(
+        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video"
+    )
+    @app.head(
+        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video"
+    )
+    async def play_douyin_account_work(
+        sec_uid: str, aweme_id: str, request: Request
+    ) -> StreamingResponse:
+        range_header = request.headers.get("range")
+        try:
+            headers = await douyin_integration.account_work_video_headers(
+                sec_uid, aweme_id, range_header
+            )
+            stream = douyin_integration.stream_account_work_video(
+                sec_uid, aweme_id, range_header
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=503, detail=f"读取作品视频失败：{exc}") from exc
+        response_headers = {
+            key.title(): value
+            for key, value in headers.items()
+            if key != "content-type"
+        }
+        response_headers["Cache-Control"] = "private, no-store"
+        return StreamingResponse(
+            stream,
+            status_code=206 if range_header and "content-range" in headers else 200,
+            media_type=headers.get("content-type", "video/mp4"),
+            headers=response_headers,
+        )
+
+    @app.post("/api/integrations/douyin/accounts/{sec_uid}/skill")
+    async def export_douyin_account_skill(sec_uid: str) -> Response:
+        try:
+            content, filename = await douyin_integration.export_account_skill(sec_uid)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = f"Skill 生成失败（HTTP {exc.response.status_code}）"
+            try:
+                detail = str(exc.response.json().get("detail") or detail)
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=503, detail=f"无法连接远程账号服务：{exc}") from exc
+        return Response(
+            content=content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "private, no-store",
+            },
         )
 
     @app.get("/api/system/status")
@@ -1308,6 +1476,25 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="未找到可用的抖音账号") from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    async def sync_account_extractor_cookies(account_id: str) -> dict[str, object]:
+        try:
+            result = await publish_manager.sync_extractor_cookies(account_id)
+            return {
+                "account_id": account_id,
+                "status": "synced",
+                "cookie_count": result.get("cookie_count", 0),
+                "ready": result.get("ready", False),
+                "missing": result.get("missing", []),
+            }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="账号不存在") from exc
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/accounts/{account_id}/extractor-cookies")
+    async def sync_account_extractor_credentials(account_id: str) -> dict[str, object]:
+        return await sync_account_extractor_cookies(account_id)
 
     @app.get("/api/publish/batches/{batch_id}")
     async def get_publish_batch(batch_id: str) -> dict[str, object]:

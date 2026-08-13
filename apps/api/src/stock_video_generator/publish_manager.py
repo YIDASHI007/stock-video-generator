@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -67,12 +68,16 @@ class PublishManager:
         settings: Settings,
         database: Database,
         service: PublishingService,
+        extractor_cookie_sync: (
+            Callable[[list[dict[str, object]]], Awaitable[dict[str, object]]] | None
+        ) = None,
     ) -> None:
         self.settings = settings
         self.database = database
         self.service = service
         self.publisher = DouyinBrowserPublisher(settings)
         self.account_auth = SocialAccountAuthenticator(settings)
+        self.extractor_cookie_sync = extractor_cookie_sync
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._login_tasks: dict[str, asyncio.Task[None]] = {}
         self._login_states: dict[str, dict[str, object]] = {}
@@ -387,7 +392,6 @@ class PublishManager:
                 "qr_revision": int(datetime.now(UTC).timestamp() * 1000),
                 "updated_at": datetime.now(UTC),
             }
-
         async def on_progress(status_value: str, message: str) -> None:
             current = self._login_states.get(account_id, {})
             self._login_states[account_id] = {
@@ -397,7 +401,6 @@ class PublishManager:
                 "message": message,
                 "updated_at": datetime.now(UTC),
             }
-
         try:
             result = await self.account_auth.login(
                 platform,
@@ -420,6 +423,16 @@ class PublishManager:
                 "dom_snapshot_path": result.dom_snapshot_path,
                 "updated_at": datetime.now(UTC),
             }
+            if platform == "douyin" and self.extractor_cookie_sync is not None:
+                try:
+                    sync_result = await self.sync_extractor_cookies(account_id)
+                    self._login_states[account_id]["message"] = (
+                        f"{label}登录成功，抓取凭证已同步（{sync_result['cookie_count']} 项）"
+                    )
+                except Exception as sync_error:
+                    self._login_states[account_id]["message"] = (
+                        f"{label}登录成功，但抓取凭证同步失败：{sync_error}"
+                    )
         except asyncio.CancelledError:
             self._login_states[account_id] = {
                 "account_id": account_id,
@@ -441,6 +454,18 @@ class PublishManager:
                 "error_type": type(exc).__name__,
                 "updated_at": datetime.now(UTC),
             }
+
+    async def sync_extractor_cookies(self, account_id: str) -> dict[str, object]:
+        if self.extractor_cookie_sync is None:
+            raise ValueError("抓取凭证同步服务尚未配置")
+        with self.database.session() as session:
+            account = session.get(PublishAccountRecord, account_id)
+            if account is None:
+                raise KeyError("account")
+            platform = account.platform
+            profile_dir = Path(account.browser_profile_dir)
+        cookies = await self.account_auth.export_cookies(platform, profile_dir)
+        return await self.extractor_cookie_sync(cookies)
 
     def login_status(self, account_id: str) -> dict[str, object]:
         with self.database.session() as session:
