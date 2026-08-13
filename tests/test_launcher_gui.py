@@ -102,7 +102,7 @@ def test_release_api_url_accepts_github_repository() -> None:
 
 
 def test_workbench_url_is_versioned_to_avoid_stale_browser_tabs() -> None:
-    assert _workbench_url(8877) == "http://127.0.0.1:8877/?desktop=v0.1.12"
+    assert _workbench_url(8877) == "http://127.0.0.1:8877/?desktop=v0.1.13"
 
 
 def test_development_mode_requires_git_checkout(monkeypatch, tmp_path) -> None:
@@ -117,19 +117,19 @@ def test_update_summary_explains_development_and_installed_modes() -> None:
     development = UpdateCheckResult(
         manager=None,
         update=None,
-        current_version="0.1.12",
+        current_version="0.1.13",
         mode="development",
         latest_version="0.1.6",
     )
     installed = UpdateCheckResult(
         manager=None,
         update=None,
-        current_version="0.1.12",
+        current_version="0.1.13",
         mode="installed",
     )
 
-    assert _format_update_summary(development) == "开发版 v0.1.12 · 正式版 v0.1.6"
-    assert _format_update_summary(installed) == "已是最新 v0.1.12"
+    assert _format_update_summary(development) == "开发版 v0.1.13 · 正式版 v0.1.6"
+    assert _format_update_summary(installed) == "已是最新 v0.1.13"
 
 
 def test_single_instance_guard_closes_created_mutex(monkeypatch):
@@ -182,7 +182,7 @@ def test_duplicate_launcher_opens_existing_workbench_without_creating_window(
     result = run_launcher_gui(tmp_path, tmp_path, 8877)
 
     assert result == 0
-    assert opened == ["http://127.0.0.1:8877/?desktop=v0.1.12"]
+    assert opened == ["http://127.0.0.1:8877/?desktop=v0.1.13"]
 
 
 def test_update_size_prefers_delta_chain() -> None:

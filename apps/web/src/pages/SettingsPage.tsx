@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useState} from "react";
+import {BrainCircuit, CheckCircle2, KeyRound, LoaderCircle, Save} from "lucide-react";
 
 import {
   API_BASE,
@@ -9,6 +10,7 @@ import {
   previewTopics,
   uploadBgm,
   type MarketCode,
+  type AiModelSettings,
   type PipelinePolicy,
   type PipelineStatusResponse,
   type TopicDirective,
@@ -57,6 +59,49 @@ const voiceOptions = [
   ["zh-CN-YunjianNeural", "云健（男声，沉稳）"],
   ["zh-CN-YunyangNeural", "云扬（男声，新闻腔）"],
 ];
+
+const AiModelForm: React.FC = () => {
+  const [settings, setSettings] = useState<AiModelSettings | null>(null);
+  const [draft, setDraft] = useState({enabled: true, provider: "deepseek", model: "deepseek-v4-flash", api_key: "", request_timeout_seconds: 300});
+  const [busy, setBusy] = useState<"save" | "test" | "">("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api<AiModelSettings>("/api/settings/ai-model").then((value) => {
+      setSettings(value);
+      setDraft({enabled: value.enabled, provider: value.provider, model: value.model, api_key: "", request_timeout_seconds: value.request_timeout_seconds});
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, []);
+
+  const run = async (kind: "save" | "test") => {
+    setBusy(kind); setNotice(null); setError(null);
+    try {
+      if (kind === "save") {
+        const value = await api<AiModelSettings>("/api/settings/ai-model", {method: "PUT", body: JSON.stringify({...draft, api_key: draft.api_key || null})});
+        setSettings(value); setDraft((current) => ({...current, api_key: ""})); setNotice("DeepSeek 配置已加密保存在当前电脑。");
+      } else {
+        const value = await api<{model: string; model_available: boolean}>("/api/settings/ai-model/test", {method: "POST"});
+        setNotice(value.model_available ? `连接成功，模型 ${value.model} 可用。` : `已连接 DeepSeek，但账号暂未返回模型 ${value.model}。`);
+      }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(""); }
+  };
+
+  if (!settings) return error ? <ErrorNotice message={error}/> : <p className="quiet-line">正在读取模型配置…</p>;
+  return <div className="ai-model-settings">
+    {error ? <ErrorNotice message={error}/> : null}{notice ? <SuccessNotice message={notice}/> : null}
+    <div className="ai-model-intro"><span><BrainCircuit size={20}/></span><div><strong>DeepSeek 文案分析</strong><p>读取已提取逐字稿，建立可执行的写作方法论并生成 Skill。密钥只保存在当前电脑。</p></div><em className={settings.api_key_configured ? "ready" : ""}>{settings.api_key_configured ? <><CheckCircle2 size={13}/>已配置</> : <><KeyRound size={13}/>未配置</>}</em></div>
+    <div className="field-grid ai-model-fields">
+      <label>服务商<select value={draft.provider} disabled><option value="deepseek">DeepSeek</option></select></label>
+      <label>分析模型<select value={draft.model} onChange={(event) => setDraft({...draft, model: event.target.value})}>{settings.available_models.map((model) => <option key={model} value={model}>{model === "deepseek-v4-pro" ? "DeepSeek V4 Pro（质量优先）" : "DeepSeek V4 Flash（推荐）"}</option>)}</select></label>
+      <label className="ai-key-field">API Key<input type="password" autoComplete="new-password" value={draft.api_key} onChange={(event) => setDraft({...draft, api_key: event.target.value})} placeholder={settings.api_key_hint ?? "粘贴 DeepSeek API Key"}/><small>留空保存会继续使用现有密钥，不会传给浏览器或写入 Skill。</small></label>
+      <label>分析超时（秒）<input type="number" min={30} max={900} value={draft.request_timeout_seconds} onChange={(event) => setDraft({...draft, request_timeout_seconds: Number(event.target.value)})}/></label>
+    </div>
+    <label className="checkbox-label ai-enable"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({...draft, enabled: event.target.checked})}/>启用 AI 画像与写作方法论</label>
+    <div className="form-actions"><button className="button primary" type="button" disabled={Boolean(busy)} onClick={() => void run("save")}>{busy === "save" ? <LoaderCircle className="spin" size={14}/> : <Save size={14}/>}保存模型配置</button><button className="button secondary" type="button" disabled={Boolean(busy) || !settings.api_key_configured} onClick={() => void run("test")}>{busy === "test" ? <LoaderCircle className="spin" size={14}/> : <BrainCircuit size={14}/>}测试连接</button></div>
+  </div>;
+};
 
 /* ---------------- 自动生产策略表单 ---------------- */
 
@@ -583,6 +628,14 @@ export const SettingsPage: React.FC = () => {
 
       <section className="dash-section">
         <div className="section-head">
+          <h2>AI 模型</h2>
+          <span className="section-hint">本机加密密钥 · 用于画像、方法论与 Skill</span>
+        </div>
+        <AiModelForm />
+      </section>
+
+      <section className="dash-section">
+        <div className="section-head">
           <h2>系统信息</h2>
         </div>
         <dl className="detail-list settings-info">
@@ -611,3 +664,161 @@ export const SettingsPage: React.FC = () => {
     </div>
   );
 };
+
+const SettingsHeader: React.FC<{
+  kicker: string;
+  title: string;
+  description: string;
+}> = ({kicker, title, description}) => (
+  <header className="module-header settings-header">
+    <div>
+      <span className="module-kicker">{kicker}</span>
+      <h1>{title}</h1>
+      <p>{description}</p>
+    </div>
+  </header>
+);
+
+const HealthCard: React.FC<{
+  name: string;
+  available: boolean;
+  message: string;
+  meta?: string;
+}> = ({name, available, message, meta}) => (
+  <article className={`health-card ${available ? "ok" : "bad"}`}>
+    <div className="health-card-head">
+      <strong>{name}</strong>
+      <span className={`badge ${available ? "badge-ok" : "badge-bad"}`}>
+        {available ? "正常" : "异常"}
+      </span>
+    </div>
+    <p>{message}</p>
+    {meta ? <small className="num muted">{meta}</small> : null}
+  </article>
+);
+
+export const DataSourcesSettingsPage: React.FC = () => {
+  const loader = useCallback(() => api<Provider[]>("/api/providers/health"), []);
+  const {data, error, loading, refresh} = usePolling(loader, 30_000);
+  const healthy = data?.filter((item) => item.available).length ?? 0;
+
+  return (
+    <div className="page settings-page">
+      <SettingsHeader
+        kicker="DATA CONNECTIONS"
+        title="数据源"
+        description="查看行情连接的实时可用性与响应速度，异常会保留真实原因。"
+      />
+      {error ? <ErrorNotice message={error} /> : null}
+      <section className="settings-summary-bar">
+        <span><strong>{data?.length ?? 0}</strong> 个连接</span>
+        <span><strong>{healthy}</strong> 个可用</span>
+        <button type="button" className="button secondary" onClick={refresh}>重新检查</button>
+      </section>
+      <section className="dash-section">
+        <div className="section-head">
+          <h2>行情数据源</h2>
+          <span className="section-hint">真实小范围请求 · 每 30 秒自动检查</span>
+        </div>
+        {loading && !data ? <p className="quiet-line">正在检查数据源…</p> : null}
+        {data ? <div className="health-grid">
+          {data.map((item) => (
+            <HealthCard
+              key={item.name}
+              name={item.name}
+              available={item.available}
+              message={item.message}
+              meta={item.latency_ms === null ? "暂无延迟数据" : `响应 ${Math.round(item.latency_ms)} ms`}
+            />
+          ))}
+        </div> : null}
+      </section>
+    </div>
+  );
+};
+
+export const AiModelSettingsPage: React.FC = () => (
+  <div className="page settings-page settings-form-page">
+    <SettingsHeader
+      kicker="AI PROVIDERS"
+      title="AI 模型"
+      description="配置文案分析使用的模型、API Key 与请求超时，并在保存后验证连接。"
+    />
+    <section className="dash-section settings-focus-card">
+      <div className="section-head">
+        <h2>模型连接</h2>
+        <span className="section-hint">密钥仅在当前电脑加密保存</span>
+      </div>
+      <AiModelForm />
+    </section>
+  </div>
+);
+
+export const SystemConfigPage: React.FC = () => {
+  const loader = useCallback(
+    () => api<{status: string; components: Component[]}>("/health"),
+    [],
+  );
+  const {data, error, loading, refresh} = usePolling(loader, 30_000);
+  const healthy = data?.components.filter((item) => item.available).length ?? 0;
+
+  return (
+    <div className="page settings-page">
+      <SettingsHeader
+        kicker="LOCAL RUNTIME"
+        title="系统配置"
+        description="查看本机运行依赖、服务地址和各模块的健康状态。"
+      />
+      {error ? <ErrorNotice message={error} /> : null}
+      <section className="settings-summary-bar">
+        <span><strong>{healthy}</strong> / {data?.components.length ?? 0} 个组件正常</span>
+        <span className={data?.status === "ok" ? "status-ok" : "status-bad"}>
+          整体状态：{data?.status === "ok" ? "正常" : data?.status ?? "检查中"}
+        </span>
+        <button type="button" className="button secondary" onClick={refresh}>刷新状态</button>
+      </section>
+      <section className="dash-section">
+        <div className="section-head">
+          <h2>运行环境</h2>
+          <span className="section-hint">数据库、渲染、配音与磁盘</span>
+        </div>
+        {loading && !data ? <p className="quiet-line">正在检查运行环境…</p> : null}
+        {data ? <div className="health-grid">
+          {data.components.map((item) => (
+            <HealthCard
+              key={item.name}
+              name={componentLabels[item.name] ?? item.name}
+              available={item.available}
+              message={item.message}
+            />
+          ))}
+        </div> : null}
+      </section>
+      <section className="dash-section">
+        <div className="section-head"><h2>服务信息</h2></div>
+        <dl className="detail-list settings-info">
+          <div><dt>API 地址</dt><dd>{API_BASE}</dd></div>
+          <div><dt>健康检查</dt><dd>/health · /api/providers/health</dd></div>
+          <div><dt>状态刷新</dt><dd>驾驶舱与任务中心每 3 秒，本页每 30 秒</dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+};
+
+export const OptimizationSettingsPage: React.FC = () => (
+  <div className="page settings-page settings-form-page">
+    <SettingsHeader
+      kicker="PRODUCTION POLICY"
+      title="优化策略"
+      description="集中管理自动选题、内容配比、配音、背景音乐和生产水位。"
+    />
+    <section className="dash-section settings-focus-card">
+      <div className="section-head">
+        <h2>自动生产策略</h2>
+        <span className="section-hint">真实行情选题 · 确定性评分 · 失败自动搁浅</span>
+      </div>
+      <PolicyForm />
+    </section>
+  </div>
+);

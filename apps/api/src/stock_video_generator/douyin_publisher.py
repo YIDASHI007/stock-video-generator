@@ -99,11 +99,24 @@ class AgentFallback:
         bundled_entry = (
             settings.runtime_dir / "apps" / "publisher-agent" / "dist" / "index.js"
         )
+        source_entry = (
+            settings.runtime_dir / "apps" / "publisher-agent" / "src" / "index.ts"
+        )
+        tsx_entry = settings.runtime_dir / "node_modules" / "tsx" / "dist" / "cli.mjs"
         node = settings.resolve_node_executable()
         if configured:
             self.command_args = shlex.split(configured, posix=os.name != "nt")
+        elif (
+            settings.env == "development"
+            and node
+            and source_entry.is_file()
+            and tsx_entry.is_file()
+        ):
+            self.command_args = [node, str(tsx_entry), str(source_entry)]
         elif node and bundled_entry.is_file():
             self.command_args = [node, str(bundled_entry)]
+        elif node and source_entry.is_file() and tsx_entry.is_file():
+            self.command_args = [node, str(tsx_entry), str(source_entry)]
         else:
             self.command_args = []
         self.environment = os.environ.copy()

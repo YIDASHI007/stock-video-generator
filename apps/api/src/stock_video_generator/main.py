@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 
 from stock_video_generator import __version__
+from stock_video_generator.ai_models import AiModelService, AiModelSettingsUpdate
 from stock_video_generator.api_models import (
     ComponentHealth,
     HealthResponse,
@@ -87,6 +88,7 @@ from stock_video_generator.publishing import (
     publish_job_payload,
 )
 from stock_video_generator.scripting import generate_script, save_script
+from stock_video_generator.source_updates import SourceUpdateService
 from stock_video_generator.thumbnails import (
     cover_path,
     ensure_thumbnail,
@@ -146,7 +148,8 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     policy_store = PolicyStore(settings.data_dir / "pipeline_policy.json")
     pipeline = PipelineManager(settings, database, jobs, selector, policy_store)
     publishing = PublishingService(settings, database)
-    douyin_integration = DouyinIntegration(settings)
+    ai_models = AiModelService(settings)
+    douyin_integration = DouyinIntegration(settings, ai_models)
     publish_manager = PublishManager(
         settings,
         database,
@@ -191,6 +194,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     app.state.publish_batches = publish_batches
     app.state.publish_batch_manager = publish_batch_manager
     app.state.douyin_integration = douyin_integration
+    app.state.ai_models = ai_models
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -341,6 +345,31 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         results = await market_data.health()
         return [result.model_dump(mode="json") for result in results]
 
+    @app.get("/api/settings/ai-model")
+    async def ai_model_settings() -> dict[str, object]:
+        return ai_models.public_settings()
+
+    @app.put("/api/settings/ai-model")
+    async def update_ai_model_settings(
+        request: AiModelSettingsUpdate,
+    ) -> dict[str, object]:
+        try:
+            return ai_models.save_settings(request)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/settings/ai-model/test")
+    async def test_ai_model() -> dict[str, object]:
+        try:
+            return await ai_models.test_connection()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = "DeepSeek API Key 无效或模型服务拒绝访问"
+            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=503, detail=f"无法连接 DeepSeek：{exc}") from exc
+
     @app.get("/api/integrations/douyin/settings")
     async def douyin_settings() -> dict[str, object]:
         return douyin_integration.public_settings()
@@ -465,14 +494,10 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         return await _douyin_account_call(douyin_integration.list_accounts())
 
     @app.post("/api/integrations/douyin/accounts/{sec_uid}")
-    async def save_douyin_account(
-        sec_uid: str, account: dict[str, object]
-    ) -> dict[str, object]:
+    async def save_douyin_account(sec_uid: str, account: dict[str, object]) -> dict[str, object]:
         if str(account.get("sec_uid") or "") != sec_uid:
             raise HTTPException(status_code=422, detail="账号标识不一致")
-        return await _douyin_account_call(
-            douyin_integration.save_account(sec_uid, account)
-        )
+        return await _douyin_account_call(douyin_integration.save_account(sec_uid, account))
 
     @app.get("/api/integrations/douyin/accounts/{sec_uid}")
     async def get_douyin_account(sec_uid: str) -> dict[str, object]:
@@ -486,17 +511,13 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     async def sync_douyin_account(
         sec_uid: str, request: DouyinAccountSyncRequest
     ) -> dict[str, object]:
-        return await _douyin_account_call(
-            douyin_integration.sync_account(sec_uid, request)
-        )
+        return await _douyin_account_call(douyin_integration.sync_account(sec_uid, request))
 
     @app.post("/api/integrations/douyin/accounts/{sec_uid}/batch")
     async def batch_douyin_account(
         sec_uid: str, request: DouyinAccountBatchRequest
     ) -> dict[str, object]:
-        result = await _douyin_account_call(
-            douyin_integration.batch_account(sec_uid, request)
-        )
+        result = await _douyin_account_call(douyin_integration.batch_account(sec_uid, request))
         job_ids = [
             str(item.get("job_id") or item.get("id") or "")
             for item in result.get("jobs", [])
@@ -504,29 +525,21 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         ]
         if job_ids:
             asyncio.create_task(
-                douyin_integration.refresh_account_archive_when_jobs_finish(
-                    sec_uid, job_ids
-                )
+                douyin_integration.refresh_account_archive_when_jobs_finish(sec_uid, job_ids)
             )
         return result
 
     @app.get("/api/integrations/douyin/accounts/{sec_uid}/jobs/{job_id}")
     async def get_douyin_account_job(sec_uid: str, job_id: str) -> dict[str, object]:
-        return await _douyin_account_call(
-            douyin_integration.get_account_job(sec_uid, job_id)
-        )
+        return await _douyin_account_call(douyin_integration.get_account_job(sec_uid, job_id))
 
     @app.post("/api/integrations/douyin/accounts/{sec_uid}/analyze")
     async def analyze_douyin_account(
         sec_uid: str, request: DouyinAccountAnalyzeRequest
     ) -> dict[str, object]:
-        return await _douyin_account_call(
-            douyin_integration.analyze_account(sec_uid, request)
-        )
+        return await _douyin_account_call(douyin_integration.analyze_account(sec_uid, request))
 
-    @app.put(
-        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/transcript"
-    )
+    @app.put("/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/transcript")
     async def update_douyin_account_work_transcript(
         sec_uid: str, aweme_id: str, payload: dict[str, object]
     ) -> dict[str, object]:
@@ -537,12 +550,8 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             douyin_integration.update_account_work_transcript(sec_uid, aweme_id, text)
         )
 
-    @app.get(
-        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video"
-    )
-    @app.head(
-        "/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video"
-    )
+    @app.get("/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video")
+    @app.head("/api/integrations/douyin/accounts/{sec_uid}/works/{aweme_id}/video")
     async def play_douyin_account_work(
         sec_uid: str, aweme_id: str, request: Request
     ) -> StreamingResponse:
@@ -551,17 +560,13 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             headers = await douyin_integration.account_work_video_headers(
                 sec_uid, aweme_id, range_header
             )
-            stream = douyin_integration.stream_account_work_video(
-                sec_uid, aweme_id, range_header
-            )
+            stream = douyin_integration.stream_account_work_video(sec_uid, aweme_id, range_header)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (RuntimeError, httpx.HTTPError) as exc:
             raise HTTPException(status_code=503, detail=f"读取作品视频失败：{exc}") from exc
         response_headers = {
-            key.title(): value
-            for key, value in headers.items()
-            if key != "content-type"
+            key.title(): value for key, value in headers.items() if key != "content-type"
         }
         response_headers["Cache-Control"] = "private, no-store"
         return StreamingResponse(
@@ -602,17 +607,19 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         database_path = (settings.data_dir / "database" / "stock_video.db").resolve()
         outputs_dir = (settings.data_dir / "outputs").resolve()
         disk = shutil.disk_usage(settings.data_dir)
-        output_bytes = sum(
-            path.stat().st_size
-            for path in outputs_dir.rglob("*")
-            if path.is_file()
-        )
+        output_bytes = sum(path.stat().st_size for path in outputs_dir.rglob("*") if path.is_file())
         with database.session() as session:
             output_count = len(session.scalars(select(OutputRecord.output_id)).all())
             job_count = len(session.scalars(select(JobRecord.job_id)).all())
             publish_count = len(session.scalars(select(PublishJobRecord.publish_id)).all())
         return {
             "version": __version__,
+            "runtime_mode": (
+                "source"
+                if (settings.runtime_dir / ".git").is_dir()
+                and settings.env == "development"
+                else "installed"
+            ),
             "data_dir": str(settings.data_dir.resolve()),
             "log_dir": str(settings.log_dir.resolve()),
             "database_path": str(database_path),
@@ -624,6 +631,15 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             "disk_free_bytes": disk.free,
             "disk_total_bytes": disk.total,
         }
+
+    @app.get("/api/system/source-update")
+    async def system_source_update(refresh: bool = False) -> dict[str, object]:
+        """Report source-runtime update state without modifying local files."""
+
+        return await asyncio.to_thread(
+            SourceUpdateService(settings.runtime_dir).check,
+            refresh=refresh,
+        )
 
     @app.get("/api/system/logs")
     async def system_logs(
@@ -1337,8 +1353,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         platform: SocialPlatform | None = None,
     ) -> list[dict[str, object]]:
         return [
-            publish_account_payload(item)
-            for item in publishing.list_accounts(platform=platform)
+            publish_account_payload(item) for item in publishing.list_accounts(platform=platform)
         ]
 
     @app.post("/api/accounts", status_code=status.HTTP_201_CREATED)
@@ -1419,8 +1434,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     @app.get("/api/publish/accounts")
     async def list_publish_accounts() -> list[dict[str, object]]:
         return [
-            publish_account_payload(item)
-            for item in publishing.list_accounts(platform="douyin")
+            publish_account_payload(item) for item in publishing.list_accounts(platform="douyin")
         ]
 
     @app.post("/api/publish/accounts", status_code=status.HTTP_201_CREATED)
@@ -1877,6 +1891,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
 
     web_dist_dir = settings.resolved_web_dist_dir
     if web_dist_dir.is_dir() and (web_dist_dir / "index.html").is_file():
+
         @app.get("/assets", include_in_schema=False)
         @app.get("/assets/materials", include_in_schema=False)
         @app.get("/assets/douyin", include_in_schema=False)

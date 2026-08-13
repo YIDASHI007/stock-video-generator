@@ -526,6 +526,16 @@ export type DouyinIntegrationSettings = {
   api_key_hint: string | null;
 };
 
+export type AiModelSettings = {
+  enabled: boolean;
+  provider: "deepseek";
+  model: string;
+  request_timeout_seconds: number;
+  api_key_configured: boolean;
+  api_key_hint: string | null;
+  available_models: string[];
+};
+
 export type ExtractorCookieSync = {
   account_id: string;
   status: "synced";
@@ -601,6 +611,9 @@ export type DouyinWork = {
   statistics?: {play?: number; like?: number; comment?: number; share?: number; collect?: number};
   job_id?: string;
   processing_status?: string;
+  processing_stage?: string;
+  processing_progress?: number;
+  processing_updated_at?: string;
   transcript?: string;
   transcript_raw?: string;
   transcript_edited?: string;
@@ -629,13 +642,21 @@ export type DouyinMethodology = {
   sample_count: number;
   transcript_count: number;
   completion_ratio: number;
-  hook_patterns: Array<{name: string; count: number}>;
-  narrative_structures: Array<{name: string; count: number}>;
-  language_style: {average_sentence_chars: number; estimated_chars_per_second: number; short_line_ratio: number};
-  opening_examples: string[];
-  ending_examples: string[];
-  evidence: Array<{aweme_id: string; title: string; url: string; excerpt: string; like: number}>;
+  hook_patterns: Array<{name: string; count?: number; purpose?: string; procedure?: string; evidence_count?: number}>;
+  narrative_structures: Array<{name: string; count?: number; use_when?: string; steps?: string[]; evidence_count?: number}>;
+  language_style?: {average_sentence_chars: number; estimated_chars_per_second: number; short_line_ratio: number};
+  opening_examples?: string[];
+  ending_examples?: string[];
+  evidence?: Array<{aweme_id: string; title: string; url: string; excerpt: string; like: number}>;
   originality_rules: string[];
+  style_summary?: string;
+  author_lens?: string[];
+  detail_selection?: string[];
+  emotional_arc?: string[];
+  language_mechanics?: string[];
+  writing_workflows?: Array<{name: string; use_when: string; steps: string[]; required_elements: string[]}>;
+  rewrite_checks?: string[];
+  analysis_engine?: {provider: string; model: string; generated_at: string};
 };
 
 export type DouyinAccountPortrait = {
