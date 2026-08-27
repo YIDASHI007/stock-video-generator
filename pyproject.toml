@@ -8,7 +8,7 @@ version = "0.1.13"
 description = "Deterministic stock historical simulation and video generation service"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Proprietary"}
+license = {text = "MIT"}
 dependencies = [
   "akshare>=1.16",
   "edge-tts>=7.0",

@@ -356,3 +356,7 @@ pnpm build
 ## 数据源与许可
 
 AKShare 和 yfinance 只是数据接入软件，软件许可证不等于 Yahoo、Sina 或东方财富行情的再分发授权。Yahoo 数据尤其需要遵守其个人使用限制。商业部署或分发 Remotion/FFmpeg 二进制前，请阅读 [THIRD_PARTY.md](THIRD_PARTY.md) 并重新核对最新条款。
+
+## 开源许可
+
+本项目源码以 [MIT License](LICENSE) 发布。第三方依赖、行情数据源和外部平台的使用仍分别受其自身条款约束。
